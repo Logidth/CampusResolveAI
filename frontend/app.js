@@ -1,26 +1,66 @@
 const API_BASE = "http://127.0.0.1:8000";
 const WS_BASE = "ws://127.0.0.1:8000";
 
-// Helper: Status badge generator
+// ==========================================
+// 0. AUTHENTICATION & SESSION MANAGEMENT
+// ==========================================
+
+function getAuthToken() {
+  return localStorage.getItem("cr_auth_token");
+}
+
+function getAuthUser() {
+  try {
+    const raw = localStorage.getItem("cr_auth_user");
+    return raw ? JSON.parse(raw) : null;
+  } catch (e) {
+    return null;
+  }
+}
+
+function setAuthSession(token, user) {
+  localStorage.setItem("cr_auth_token", token);
+  localStorage.setItem("cr_auth_user", JSON.stringify(user));
+}
+
+function clearAuthSession() {
+  localStorage.removeItem("cr_auth_token");
+  localStorage.removeItem("cr_auth_user");
+}
+
+async function handleGlobalLogout() {
+  const token = getAuthToken();
+  if (token) {
+    try {
+      await fetch(`${API_BASE}/auth/logout`, {
+        method: "POST",
+        headers: { "Authorization": `Bearer ${token}` }
+      });
+    } catch (e) {
+      // Ignore network errors on logout
+    }
+  }
+  clearAuthSession();
+  window.location.href = "dashboard.html";
+}
+
+// Helpers: Status & Badge Generators
 function getStatusBadge(status) {
   const s = status ? status.toLowerCase() : "open";
   return `<span class="badge badge-${s}">${status || "open"}</span>`;
 }
 
-// Helper: Urgency badge generator
 function getUrgencyBadge(urgency) {
   const u = urgency ? urgency.toLowerCase() : "medium";
   return `<span class="badge badge-${u}">${urgency || "medium"}</span>`;
 }
 
-// Helper: Escalation level badge generator
 function getEscalationBadge(level) {
   const lvl = level || 0;
   const cls = lvl === 0 ? "badge-esc-0" : (lvl === 1 ? "badge-esc-1" : "badge-esc-2");
   return `<span class="badge ${cls}">Level ${lvl}</span>`;
 }
 
-// Helper: Date formatter
 function formatDate(dateStr) {
   if (!dateStr) return "N/A";
   const d = new Date(dateStr);
@@ -32,15 +72,15 @@ function formatDate(dateStr) {
   });
 }
 
-// Helper: Terminal log timestamp formatter [YYYY-MM-DD HH:MM:SS]
 function formatTerminalTimestamp(dateStr) {
   const d = dateStr ? new Date(dateStr) : new Date();
   const pad = (n) => String(n).padStart(2, "0");
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
 }
 
+
 // ==========================================
-// 1. STUDENT PORTAL (index.html)
+// 1. PAGE 1: STUDENT PORTAL (index.html)
 // ==========================================
 
 const complaintForm = document.getElementById("complaintForm");
@@ -72,7 +112,7 @@ if (complaintForm) {
 
       // Render Confirmation Details
       document.getElementById("resId").innerText = data.id;
-      document.getElementById("resCategory").innerText = data.category || "General";
+      document.getElementById("resCategory").innerText = (data.category || "General").toUpperCase();
       document.getElementById("resUrgency").innerHTML = getUrgencyBadge(data.urgency);
       document.getElementById("resAuthority").innerText = data.assigned_authority || "Student Affairs";
       document.getElementById("resStatus").innerHTML = getStatusBadge(data.status);
@@ -101,6 +141,15 @@ if (complaintForm) {
       submitBtn.innerText = "Submit Complaint";
     }
   });
+
+  // Check URL query parameters for deep-linking: index.html?track=123
+  const urlParams = new URLSearchParams(window.location.search);
+  const trackParam = urlParams.get("track");
+  if (trackParam && trackIdInput) {
+    trackIdInput.value = trackParam;
+    loadComplaintDetails(trackParam);
+    document.getElementById("trackingSection")?.scrollIntoView({ behavior: "smooth" });
+  }
 }
 
 async function loadComplaintDetails(id) {
@@ -120,7 +169,7 @@ async function loadComplaintDetails(id) {
       document.getElementById("trackComplaintHeading").innerText = `Complaint #${data.id}`;
       document.getElementById("trackComplaintText").innerText = `"${data.text}"`;
       document.getElementById("trackStatusBadge").innerHTML = getStatusBadge(data.status);
-      document.getElementById("trackCategory").innerText = data.category || "General";
+      document.getElementById("trackCategory").innerText = (data.category || "General").toUpperCase();
       document.getElementById("trackUrgency").innerHTML = getUrgencyBadge(data.urgency);
       document.getElementById("trackAuthority").innerText = data.assigned_authority || "Unassigned";
       document.getElementById("trackEscalation").innerText = `Level ${data.escalation_level}`;
@@ -162,16 +211,283 @@ if (trackForm) {
   });
 }
 
-// ==========================================
-// 2. ADMIN MONITORING DASHBOARD (dashboard.html)
-// ==========================================
+
+// =======================================================
+// 2. PAGE 2: UNIFIED AUTHORITY PORTAL (dashboard.html)
+// =======================================================
+
+const authLoggedOutView = document.getElementById("authLoggedOutView");
+const authLoggedInView = document.getElementById("authLoggedInView");
+const authLoginForm = document.getElementById("authLoginForm");
+const quickAccountsList = document.getElementById("quickAccountsList");
+const loginErrorAlert = document.getElementById("loginErrorAlert");
+const loginSubmitBtn = document.getElementById("loginSubmitBtn");
 
 const complaintsTableBody = document.getElementById("complaintsTableBody");
+const counselorTableBody = document.getElementById("counselorTableBody");
 const terminalBody = document.getElementById("terminalBody");
+const authoritySelector = document.getElementById("authoritySelector");
+const authorityEmailBadge = document.getElementById("authorityEmailBadge");
+const roleLockIndicator = document.getElementById("roleLockIndicator");
+const terminalTitleLabel = document.getElementById("terminalTitleLabel");
+const tableHeaderTitle = document.getElementById("tableHeaderTitle");
 const showOnlyOpenCheckbox = document.getElementById("showOnlyOpen");
+const counselorCountBadge = document.getElementById("counselorCountBadge");
 
-if (complaintsTableBody && terminalBody) {
+// User Session Banner Elements
+const sessionUserName = document.getElementById("sessionUserName");
+const sessionRoleBadge = document.getElementById("sessionRoleBadge");
+const sessionTierBadge = document.getElementById("sessionTierBadge");
+const sessionEmailText = document.getElementById("sessionEmailText");
+const sessionLogoutBtn = document.getElementById("sessionLogoutBtn");
+const userAvatarCircle = document.getElementById("userAvatarCircle");
 
+// Tabs
+const tabComplaintsBtn = document.getElementById("tabComplaintsBtn");
+const tabCounselorBtn = document.getElementById("tabCounselorBtn");
+const complaintsTabContent = document.getElementById("complaintsTabContent");
+const counselorTabContent = document.getElementById("counselorTabContent");
+
+if (authLoggedOutView && authLoggedInView) {
+
+  const currentUser = getAuthUser();
+
+  // Practical Authority Emails Lookup
+  const AUTHORITY_EMAILS = {
+    "Warden": "dlogidth4@gmail.com",
+    "Mess Committee": "dlogidth5@gmail.com",
+    "HOD": "717824v101@kce.ac.in",
+    "Estate Office": "717824v134@kce.ac.in",
+    "Dean of Student Affairs": "abijithmohanan2006@gmail.com",
+    "Dean of Academics": "717824v101@kce.ac.in",
+    "Vice Principal": "logidth78@gmail.com",
+    "Principal": "717824v27@kce.ac.in",
+    "Counseling Cell": "717824v152@kce.ac.in",
+    "Admin": "717824v134@kce.ac.in",
+    "All": "717824v134@kce.ac.in"
+  };
+
+  let currentAuthority = "All";
+
+  // Check Auth State: Logged-in vs Logged-out
+  if (!currentUser) {
+    // Show Sign-in Form + Quick Demo Picker
+    authLoggedOutView.style.display = "block";
+    authLoggedInView.style.display = "none";
+    initQuickDemoLogin();
+  } else {
+    // Show Full Authenticated Authority Dashboard
+    authLoggedOutView.style.display = "none";
+    authLoggedInView.style.display = "block";
+    initAuthorityDashboard();
+  }
+
+  // -------------------------------------------------------------
+  // A. Quick Demo Login Initializer (Signed-out View)
+  // -------------------------------------------------------------
+  async function initQuickDemoLogin() {
+    const roleIcons = {
+      "Warden": "🏢",
+      "Mess Committee": "🍲",
+      "HOD": "📚",
+      "Estate Office": "⚡",
+      "Dean of Student Affairs": "🎓",
+      "Dean of Academics": "📖",
+      "Vice Principal": "🏛️",
+      "Principal": "👑",
+      "Counseling Cell": "🛡️",
+      "Admin": "⚙️"
+    };
+
+    try {
+      const res = await fetch(`${API_BASE}/auth/accounts`);
+      if (!res.ok) throw new Error("Failed to load demo accounts");
+      const accounts = await res.json();
+
+      quickAccountsList.innerHTML = accounts.map(acc => {
+        const icon = roleIcons[acc.role] || "👤";
+        return `
+          <div class="quick-acc-card" onclick="quickLogin('${acc.username}', '${acc.password}')">
+            <div>
+              <div class="quick-acc-role">
+                <span>${icon}</span>
+                <span>${acc.full_name || acc.role}</span>
+              </div>
+              <div class="quick-acc-meta">
+                ${acc.role} &middot; <span style="color: var(--primary); font-family: var(--font-mono); font-weight: 600;">${acc.email}</span>
+              </div>
+            </div>
+            <span class="quick-acc-badge">
+              ${acc.username}
+            </span>
+          </div>
+        `;
+      }).join("");
+    } catch (e) {
+      quickAccountsList.innerHTML = `<div style="color: var(--danger); font-size: 0.8rem; padding: 1rem;">Unable to load demo directory.</div>`;
+    }
+
+    // Quick Login Helper
+    window.quickLogin = function(username, password) {
+      document.getElementById("loginUsername").value = username;
+      document.getElementById("loginPassword").value = password;
+      executeLogin(username, password);
+    };
+
+    // Form submit handler
+    authLoginForm?.addEventListener("submit", (e) => {
+      e.preventDefault();
+      const u = document.getElementById("loginUsername").value.trim();
+      const p = document.getElementById("loginPassword").value.trim();
+      if (u && p) executeLogin(u, p);
+    });
+
+    async function executeLogin(username, password) {
+      if (loginErrorAlert) loginErrorAlert.style.display = "none";
+      if (loginSubmitBtn) {
+        loginSubmitBtn.disabled = true;
+        loginSubmitBtn.innerText = "Authenticating Authority...";
+      }
+
+      try {
+        const res = await fetch(`${API_BASE}/auth/login`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ username, password })
+        });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.detail || "Invalid credentials.");
+
+        setAuthSession(data.access_token, data.user);
+        window.location.reload();
+      } catch (err) {
+        if (loginErrorAlert) {
+          loginErrorAlert.innerText = err.message;
+          loginErrorAlert.style.display = "block";
+        } else {
+          alert(err.message);
+        }
+      } finally {
+        if (loginSubmitBtn) {
+          loginSubmitBtn.disabled = false;
+          loginSubmitBtn.innerText = "Sign In to Authority Dashboard";
+        }
+      }
+    }
+  }
+
+  // -------------------------------------------------------------
+  // B. Authenticated Authority Dashboard Initializer
+  // -------------------------------------------------------------
+  function initAuthorityDashboard() {
+    // Populate Session Banner
+    if (sessionUserName) sessionUserName.innerText = currentUser.full_name || currentUser.username;
+    if (sessionRoleBadge) sessionRoleBadge.innerText = currentUser.role;
+    if (sessionTierBadge) sessionTierBadge.innerText = currentUser.tier || "Authority Tier";
+    if (sessionEmailText) sessionEmailText.innerText = currentUser.email || AUTHORITY_EMAILS[currentUser.role] || "";
+    if (userAvatarCircle) {
+      const initials = (currentUser.full_name || currentUser.username)
+        .split(" ")
+        .map(n => n[0])
+        .join("")
+        .substring(0, 2)
+        .toUpperCase();
+      userAvatarCircle.innerText = initials || "AU";
+    }
+
+    if (sessionLogoutBtn) {
+      sessionLogoutBtn.onclick = handleGlobalLogout;
+    }
+
+    // Role-based isolation & tab configuration
+    if (currentUser.role === "Counseling Cell") {
+      currentAuthority = "Counseling Cell";
+      if (authoritySelector) {
+        authoritySelector.value = "Counseling Cell";
+        authoritySelector.disabled = true;
+      }
+      if (roleLockIndicator) {
+        roleLockIndicator.style.display = "inline-block";
+        roleLockIndicator.innerText = "🔒 Locked: Counseling Cell";
+      }
+      if (tabCounselorBtn) {
+        tabCounselorBtn.style.display = "inline-block";
+        switchTab("counselor");
+      }
+    } else if (currentUser.role === "Admin") {
+      currentAuthority = "All";
+      if (authoritySelector) {
+        authoritySelector.value = "All";
+        authoritySelector.disabled = false;
+      }
+      if (tabCounselorBtn) tabCounselorBtn.style.display = "inline-block";
+    } else if (currentUser.assigned_authority) {
+      currentAuthority = currentUser.assigned_authority;
+      if (authoritySelector) {
+        authoritySelector.value = currentAuthority;
+        authoritySelector.disabled = true; // Lock authority dropdown
+      }
+      if (roleLockIndicator) {
+        roleLockIndicator.style.display = "inline-block";
+        roleLockIndicator.innerText = `🔒 Locked: ${currentUser.role}`;
+      }
+    }
+
+    function updateAuthorityHeaders() {
+      if (authorityEmailBadge) {
+        authorityEmailBadge.innerText = AUTHORITY_EMAILS[currentAuthority] || currentUser.email || "authority@campus.edu";
+      }
+      if (terminalTitleLabel) {
+        terminalTitleLabel.innerText = `● /ws/activity ~ real-time monitoring stream (${currentAuthority})`;
+      }
+      if (tableHeaderTitle) {
+        tableHeaderTitle.innerText = currentAuthority === "All" ? "Complaints Queue (Central Admin View)" : `${currentAuthority} — Assigned Queue`;
+      }
+    }
+
+    updateAuthorityHeaders();
+
+    // Tab Event Listeners
+    tabComplaintsBtn?.addEventListener("click", () => switchTab("complaints"));
+    tabCounselorBtn?.addEventListener("click", () => {
+      switchTab("counselor");
+      loadCounselorComplaints();
+    });
+
+    function switchTab(tabName) {
+      tabComplaintsBtn.className = tabName === "complaints" ? "btn btn-sm btn-primary" : "btn btn-sm btn-outline";
+      if (tabCounselorBtn) tabCounselorBtn.className = tabName === "counselor" ? "btn btn-sm btn-primary" : "btn btn-sm btn-outline";
+
+      complaintsTabContent.style.display = tabName === "complaints" ? "block" : "none";
+      if (counselorTabContent) counselorTabContent.style.display = tabName === "counselor" ? "block" : "none";
+    }
+
+    authoritySelector?.addEventListener("change", (e) => {
+      currentAuthority = e.target.value;
+      updateAuthorityHeaders();
+      loadDashboardComplaints();
+      loadInitialTerminalLogs();
+    });
+
+    // Check Deep Linking: dashboard.html?complaint_id=123
+    const urlParams = new URLSearchParams(window.location.search);
+    const deepComplaintId = urlParams.get("complaint_id");
+    if (deepComplaintId) {
+      switchTab("complaints");
+    }
+
+    loadDashboardComplaints();
+    loadInitialTerminalLogs();
+    if (currentUser.role === "Counseling Cell" || currentUser.role === "Admin") {
+      loadCounselorComplaints();
+    }
+    initTerminalWebSocket();
+    setInterval(loadDashboardComplaints, 5000);
+  }
+
+  // -------------------------------------------------------------
+  // C. Terminal & Complaints Rendering
+  // -------------------------------------------------------------
   function createTerminalLogElement(item) {
     const actionStr = (item.action || "").toUpperCase();
     
@@ -210,6 +526,10 @@ if (complaintsTableBody && terminalBody) {
   }
 
   function appendTerminalLog(item, isPrepend = false) {
+    if (currentAuthority !== "All" && item.assigned_authority && item.assigned_authority !== currentAuthority) {
+      return;
+    }
+
     if (terminalBody.children.length === 1 && terminalBody.children[0].classList.contains("term-empty")) {
       terminalBody.innerHTML = "";
     }
@@ -229,30 +549,34 @@ if (complaintsTableBody && terminalBody) {
 
   async function loadInitialTerminalLogs() {
     try {
-      const res = await fetch(`${API_BASE}/activity-feed`);
-      if (!res.ok) throw new Error("Failed to load initial terminal logs");
+      let url = `${API_BASE}/activity-feed`;
+      if (currentAuthority !== "All") {
+        url += `?assigned_authority=${encodeURIComponent(currentAuthority)}`;
+      }
+      const res = await fetch(url);
+      if (!res.ok) throw new Error("Failed to load activity logs");
       const feed = await res.json();
 
       if (feed.length === 0) {
-        terminalBody.innerHTML = `<div class="term-empty">Console initialized. No grievance activity logged yet.</div>`;
+        terminalBody.innerHTML = `<div class="term-empty">Console initialized. No activity logged for ${currentAuthority}.</div>`;
         return;
       }
 
       terminalBody.innerHTML = "";
       const chronological = feed.slice().reverse();
-      chronological.forEach((item) => {
-        appendTerminalLog(item, false);
-      });
+      chronological.forEach((item) => appendTerminalLog(item, false));
     } catch (err) {
-      terminalBody.innerHTML = `<div class="term-empty" style="color: #f87171;">Failed to connect to activity feed: ${err.message}</div>`;
+      terminalBody.innerHTML = `<div class="term-empty" style="color: #f87171;">Stream connection error: ${err.message}</div>`;
     }
   }
 
-  // Auto-refreshes every 5 seconds (Excludes confidential harassment records from general view)
   async function loadDashboardComplaints() {
     try {
-      // GET /complaints excludes harassment by default for privacy
-      const res = await fetch(`${API_BASE}/complaints`);
+      let url = `${API_BASE}/complaints`;
+      if (currentAuthority !== "All") {
+        url += `?assigned_authority=${encodeURIComponent(currentAuthority)}`;
+      }
+      const res = await fetch(url);
       if (!res.ok) throw new Error("Unable to fetch complaints");
       const list = await res.json();
 
@@ -271,15 +595,24 @@ if (complaintsTableBody && terminalBody) {
       const displayList = showOnlyOpen ? openList : list;
 
       if (displayList.length === 0) {
-        const msg = showOnlyOpen ? "No active open complaints in general queue." : "No general complaints recorded.";
+        const msg = showOnlyOpen 
+          ? `No open complaints assigned to ${currentAuthority}.` 
+          : `No complaints recorded for ${currentAuthority}.`;
         complaintsTableBody.innerHTML = `<tr><td colspan="9" style="text-align: center; color: var(--text-muted); padding: 2rem;">${msg}</td></tr>`;
         return;
       }
 
+      // Check for deep-linked complaint to highlight
+      const urlParams = new URLSearchParams(window.location.search);
+      const deepId = parseInt(urlParams.get("complaint_id"), 10);
+
       complaintsTableBody.innerHTML = displayList
         .map(
-          (c) => `
-        <tr>
+          (c) => {
+            const isDeepMatch = deepId && c.id === deepId;
+            const rowHighlight = isDeepMatch ? `style="background: #eff6ff; border-left: 4px solid var(--primary);"` : "";
+            return `
+        <tr id="row-complaint-${c.id}" ${rowHighlight}>
           <td><strong style="color: var(--primary);">#${c.id}</strong></td>
           <td style="max-width: 240px; word-break: break-word; font-size: 0.85rem;" title="${c.text}">
             ${c.text.length > 70 ? c.text.substring(0, 70) + '...' : c.text}
@@ -298,130 +631,30 @@ if (complaintsTableBody && terminalBody) {
             }
           </td>
         </tr>
-      `
+      `;
+          }
         )
         .join("");
+
+      if (deepId) {
+        const targetEl = document.getElementById(`row-complaint-${deepId}`);
+        if (targetEl) {
+          targetEl.scrollIntoView({ behavior: "smooth", block: "center" });
+        }
+      }
     } catch (err) {
-      complaintsTableBody.innerHTML = `<tr><td colspan="9" style="text-align: center; color: var(--danger); padding: 2rem;">Backend connection error. Ensure FastAPI server is running.</td></tr>`;
+      complaintsTableBody.innerHTML = `<tr><td colspan="9" style="text-align: center; color: var(--danger); padding: 2rem;">Backend connection error.</td></tr>`;
     }
   }
 
-  function initTerminalWebSocket() {
-    const termStatus = document.getElementById("termStatusBadge");
-    const ws = new WebSocket(`${WS_BASE}/ws/activity`);
 
-    ws.onopen = () => {
-      if (termStatus) {
-        termStatus.className = "terminal-status-badge";
-        termStatus.innerHTML = `<span style="display: inline-block; width: 6px; height: 6px; border-radius: 50%; background: var(--term-green);"></span> STREAM ACTIVE`;
-      }
-    };
 
-    ws.onmessage = (event) => {
-      try {
-        const item = JSON.parse(event.data);
-        appendTerminalLog(item, false);
-        loadDashboardComplaints();
-      } catch (e) {
-        console.error("Error processing websocket activity:", e);
-      }
-    };
-
-    ws.onclose = () => {
-      if (termStatus) {
-        termStatus.className = "terminal-status-badge reconnecting";
-        termStatus.innerHTML = `<span style="display: inline-block; width: 6px; height: 6px; border-radius: 50%; background: #ef4444;"></span> RECONNECTING...`;
-      }
-      setTimeout(initTerminalWebSocket, 3000);
-    };
-
-    ws.onerror = () => {
-      ws.close();
-    };
-  }
-
-  window.resolveComplaint = async function (complaintId) {
-    if (!confirm(`Mark Complaint #${complaintId} as resolved?`)) return;
-
-    try {
-      const res = await fetch(`${API_BASE}/complaints/${complaintId}/resolve`, {
-        method: "PATCH",
-      });
-      if (!res.ok) throw new Error("Failed to resolve complaint");
-      loadDashboardComplaints();
-    } catch (err) {
-      alert("Error: " + err.message);
-    }
-  };
-
-  document.getElementById("clearTerminalBtn")?.addEventListener("click", () => {
-    terminalBody.innerHTML = `<div class="term-empty">Terminal cleared. Waiting for new activity...</div>`;
-  });
-
-  document.getElementById("manualRefreshBtn")?.addEventListener("click", () => {
-    loadDashboardComplaints();
-  });
-  
-  showOnlyOpenCheckbox?.addEventListener("change", () => {
-    loadDashboardComplaints();
-  });
-
-  loadDashboardComplaints();
-  loadInitialTerminalLogs();
-  initTerminalWebSocket();
-  setInterval(loadDashboardComplaints, 5000);
-}
-
-// ==========================================
-// 3. PROTECTED COUNSELOR PORTAL (counselor.html)
-// ==========================================
-
-const counselorLoginForm = document.getElementById("counselorLoginForm");
-const counselorAuthGate = document.getElementById("counselorAuthGate");
-const counselorProtectedView = document.getElementById("counselorProtectedView");
-const counselorTableBody = document.getElementById("counselorTableBody");
-const counselorCountBadge = document.getElementById("counselorCountBadge");
-
-if (counselorLoginForm) {
-  const COUNSELOR_PASSCODE = "counselor2026";
-
-  // Check existing session
-  if (sessionStorage.getItem("counselor_authenticated") === "true") {
-    showCounselorDashboard();
-  }
-
-  counselorLoginForm.addEventListener("submit", (e) => {
-    e.preventDefault();
-    const pin = document.getElementById("counselorPin").value.trim();
-    if (pin === COUNSELOR_PASSCODE) {
-      sessionStorage.setItem("counselor_authenticated", "true");
-      showCounselorDashboard();
-    } else {
-      alert("Incorrect Counselor Passcode. (Demo passcode: counselor2026)");
-    }
-  });
-
-  document.getElementById("counselorLogoutBtn")?.addEventListener("click", () => {
-    sessionStorage.removeItem("counselor_authenticated");
-    counselorProtectedView.style.display = "none";
-    counselorAuthGate.style.display = "block";
-    document.getElementById("counselorPin").value = "";
-  });
-
-  document.getElementById("counselorRefreshBtn")?.addEventListener("click", () => {
-    loadCounselorComplaints();
-  });
-
-  function showCounselorDashboard() {
-    counselorAuthGate.style.display = "none";
-    counselorProtectedView.style.display = "block";
-    loadCounselorComplaints();
-  }
-
+  // Load Protected Counselor Complaints
   async function loadCounselorComplaints() {
+    if (!counselorTableBody) return;
     try {
       const res = await fetch(`${API_BASE}/counselor/complaints`);
-      if (!res.ok) throw new Error("Failed to load counseling records");
+      if (!res.ok) throw new Error("Failed to load confidential counseling records");
       const list = await res.json();
 
       if (counselorCountBadge) {
@@ -429,7 +662,7 @@ if (counselorLoginForm) {
       }
 
       if (list.length === 0) {
-        counselorTableBody.innerHTML = `<tr><td colspan="8" style="text-align: center; color: var(--text-muted); padding: 2rem;">No harassment or safety records filed.</td></tr>`;
+        counselorTableBody.innerHTML = `<tr><td colspan="8" style="text-align: center; color: var(--text-muted); padding: 2rem;">No confidential harassment or safety records filed.</td></tr>`;
         return;
       }
 
@@ -449,7 +682,7 @@ if (counselorLoginForm) {
           <td style="text-align: right;">
             ${
               c.status !== "resolved"
-                ? `<button onclick="resolveCounselorCase(${c.id})" class="btn btn-sm" style="background: #e11d48; color: #fff;">Resolve Case</button>`
+                ? `<button onclick="resolveComplaint(${c.id})" class="btn btn-sm" style="background: #e11d48; color: #fff;">Resolve Case</button>`
                 : `<span style="color: var(--success); font-weight: 600; font-size: 0.8rem;">✓ Closed</span>`
             }
           </td>
@@ -462,17 +695,71 @@ if (counselorLoginForm) {
     }
   }
 
-  window.resolveCounselorCase = async function (caseId) {
-    if (!confirm(`Mark Confidential Case #CASE-${caseId} as resolved by Counseling Cell?`)) return;
+  // Resolve Complaint with Official Remarks
+  window.resolveComplaint = async function (complaintId) {
+    const remarks = prompt(`Mark Complaint #${complaintId} as resolved.\nEnter official resolution remarks / action taken (optional):`, "Issue inspected and resolved by authority.");
+    if (remarks === null) return; // User cancelled
 
     try {
-      const res = await fetch(`${API_BASE}/complaints/${caseId}/resolve`, {
+      const res = await fetch(`${API_BASE}/complaints/${complaintId}/resolve`, {
         method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ remarks: remarks.trim() })
       });
-      if (!res.ok) throw new Error("Failed to resolve case");
+      if (!res.ok) throw new Error("Failed to resolve complaint");
+      loadDashboardComplaints();
       loadCounselorComplaints();
     } catch (err) {
       alert("Error: " + err.message);
     }
   };
+
+  function initTerminalWebSocket() {
+    const termStatus = document.getElementById("termStatusBadge");
+    const ws = new WebSocket(`${WS_BASE}/ws/activity`);
+
+    ws.onopen = () => {
+      if (termStatus) {
+        termStatus.className = "terminal-status-badge";
+        termStatus.innerHTML = `<span style="display: inline-block; width: 6px; height: 6px; border-radius: 50%; background: var(--term-green);"></span> STREAM ACTIVE`;
+      }
+    };
+
+    ws.onmessage = (event) => {
+      try {
+        const item = JSON.parse(event.data);
+        appendTerminalLog(item, false);
+        loadDashboardComplaints();
+        loadAuthorityEmails();
+      } catch (e) {
+        console.error("Websocket activity error:", e);
+      }
+    };
+
+    ws.onclose = () => {
+      if (termStatus) {
+        termStatus.className = "terminal-status-badge reconnecting";
+        termStatus.innerHTML = `<span style="display: inline-block; width: 6px; height: 6px; border-radius: 50%; background: #ef4444;"></span> RECONNECTING...`;
+      }
+      setTimeout(initTerminalWebSocket, 3000);
+    };
+
+    ws.onerror = () => {
+      ws.close();
+    };
+  }
+
+  document.getElementById("clearTerminalBtn")?.addEventListener("click", () => {
+    terminalBody.innerHTML = `<div class="term-empty">Terminal cleared. Waiting for new activity...</div>`;
+  });
+
+  document.getElementById("manualRefreshBtn")?.addEventListener("click", () => {
+    loadDashboardComplaints();
+    loadAuthorityEmails();
+    loadCounselorComplaints();
+  });
+  
+  showOnlyOpenCheckbox?.addEventListener("change", () => {
+    loadDashboardComplaints();
+  });
 }

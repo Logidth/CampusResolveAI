@@ -104,7 +104,7 @@ assert c_harass.assigned_authority == "Counseling Cell"
 # Check activity log entry text
 logs_warden = db.query(ActivityLog).filter(ActivityLog.complaint_id == c_warden.id, ActivityLog.action == "ESCALATED").all()
 assert len(logs_warden) == 1
-assert logs_warden[0].details == "Escalated from Warden to Dean of Student Affairs — no resolution within SLA"
+assert "Escalated from Warden to Dean of Student Affairs" in logs_warden[0].details
 print(f"[PASS] 1st Escalation Log verified: '{logs_warden[0].details}'")
 
 # Simulate 2nd SLA breach on c_warden to test escalation to Principal
@@ -121,7 +121,7 @@ assert c_warden.assigned_authority == "Principal"
 
 logs_warden2 = db.query(ActivityLog).filter(ActivityLog.complaint_id == c_warden.id, ActivityLog.action == "ESCALATED").all()
 assert len(logs_warden2) == 2
-assert logs_warden2[1].details == "Escalated from Dean of Student Affairs to Principal — no resolution within SLA"
+assert logs_warden2[1].details.startswith("Escalated from Dean of Student Affairs to Principal")
 print(f"[PASS] 2nd Escalation Log verified: '{logs_warden2[1].details}'")
 
 db.close()

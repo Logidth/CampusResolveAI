@@ -7,11 +7,11 @@
   <link rel="stylesheet" href="style.css">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
 </head>
 <body>
 
-  <!-- Minimal Header -->
+  <!-- Minimal Two-Page Header -->
   <header>
     <div class="nav-container">
       <a href="index.html" class="brand">
@@ -19,9 +19,8 @@
         <div class="brand-title">Campus<span>Resolve</span></div>
       </a>
       <nav class="nav-links">
-        <a href="index.html" class="nav-link active">Student Portal</a>
-        <a href="dashboard.html" class="nav-link">Admin Dashboard</a>
-        <a href="counselor.html" class="nav-link" style="color: #e11d48;">🔒 Counselor Portal</a>
+        <a href="index.html" class="nav-link active">🎓 Student Portal</a>
+        <a href="dashboard.html" class="nav-link" id="navAuthorityLink">🏛️ Authority Portal</a>
       </nav>
     </div>
   </header>
@@ -37,8 +36,8 @@
     <!-- 1. Submit Complaint Card -->
     <section class="card">
       <div class="card-header">
-        <h2 class="card-title">Submit a Complaint</h2>
-        <p class="card-subtitle">Please explain the issue clearly. State the location, room number, or specific concern.</p>
+        <h2 class="card-title">Submit a Grievance</h2>
+        <p class="card-subtitle">Explain your issue clearly. State the hostel block, room number, mess dining hall, academic course, or campus facility.</p>
       </div>
 
       <form id="complaintForm">
@@ -47,7 +46,7 @@
           <textarea 
             id="complaintText" 
             class="form-control" 
-            placeholder="e.g. Water supply stopped in hostel block C since this morning, or projector malfunctioning in CS room 302..." 
+            placeholder="e.g. Water supply stopped in hostel block C room 204 since this morning, or mess dinner food quality was unhygienic, or lab equipment in CS Room 302 not functioning..." 
             required></textarea>
         </div>
 
@@ -62,12 +61,12 @@
           <svg width="20" height="20" viewBox="0 0 20 20" fill="currentColor">
             <path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clip-rule="evenodd" />
           </svg>
-          Complaint Registered Successfully
+          Complaint Registered & Routed Successfully
         </div>
 
         <div class="confirmation-grid">
           <div class="meta-item">
-            <div class="meta-label">Complaint ID</div>
+            <div class="meta-label">Ticket ID</div>
             <div class="meta-value" style="color: var(--primary);">#<span id="resId"></span></div>
           </div>
           <div class="meta-item">
@@ -75,7 +74,7 @@
             <div class="meta-value" id="resCategory"></div>
           </div>
           <div class="meta-item">
-            <div class="meta-label">Urgency</div>
+            <div class="meta-label">Urgency Priority</div>
             <div class="meta-value" id="resUrgency"></div>
           </div>
           <div class="meta-item">
@@ -83,86 +82,92 @@
             <div class="meta-value" id="resAuthority"></div>
           </div>
           <div class="meta-item">
-            <div class="meta-label">Status</div>
+            <div class="meta-label">Current Status</div>
             <div class="meta-value" id="resStatus"></div>
           </div>
           <div class="meta-item">
-            <div class="meta-label">SLA Deadline</div>
+            <div class="meta-label">Resolution SLA Target</div>
             <div class="meta-value" id="resSla" style="font-size: 0.8rem;"></div>
           </div>
         </div>
 
         <a href="#trackingSection" id="trackComplaintLink" class="track-action-link">
-          🔍 Track this complaint & view timeline &rarr;
+          🔍 Track this complaint & live timeline &rarr;
         </a>
       </div>
     </section>
 
     <!-- 2. Track Complaint Card -->
-    <section id="trackingSection" class="card">
+    <section class="card" id="trackingSection">
       <div class="card-header">
-        <h2 class="card-title">Track Complaint Status</h2>
-        <p class="card-subtitle">Enter your Complaint ID to view live progress, SLA countdown, and resolution logs.</p>
+        <h2 class="card-title">Track Grievance Status</h2>
+        <p class="card-subtitle">Enter your Ticket ID to check current status, assigned authority, escalation tier, and resolution audit trail.</p>
       </div>
 
-      <form id="trackForm" style="display: flex; gap: 0.75rem; margin-bottom: 1.25rem;">
-        <input 
-          type="number" 
-          id="trackIdInput" 
-          class="form-control" 
-          placeholder="Enter Complaint ID (e.g. 1)" 
-          style="max-width: 280px;" 
-          required>
-        <button type="submit" id="trackBtn" class="btn btn-outline">
-          Track Status
-        </button>
+      <form id="trackForm">
+        <div style="display: flex; gap: 0.75rem; align-items: flex-end; flex-wrap: wrap;">
+          <div class="form-group" style="flex: 1; min-width: 200px; margin-bottom: 0;">
+            <label for="trackIdInput">Complaint Ticket ID</label>
+            <input 
+              type="number" 
+              id="trackIdInput" 
+              class="form-control" 
+              placeholder="e.g. 1" 
+              min="1" 
+              required>
+          </div>
+          <button type="submit" id="trackBtn" class="btn btn-outline" style="height: 42px;">
+            Search Status
+          </button>
+        </div>
       </form>
 
-      <!-- Track Detail Result Box -->
-      <div id="trackResultBox" style="display: none; background: #ffffff; border: 1px solid var(--border-color); border-radius: var(--radius-md); padding: 1.25rem;">
-        <div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 0.75rem; flex-wrap: wrap; gap: 0.5rem;">
-          <div>
-            <h3 id="trackComplaintHeading" style="font-size: 1.05rem; font-weight: 600; color: var(--text-main);"></h3>
-            <p id="trackComplaintText" style="color: var(--text-muted); font-size: 0.875rem; margin-top: 0.25rem;"></p>
-          </div>
+      <!-- Track Result Box -->
+      <div id="trackResultBox" class="track-result">
+        <div style="display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid var(--border-color); padding-bottom: 0.75rem; margin-bottom: 1rem;">
+          <h3 style="font-size: 1.1rem; font-weight: 700; color: var(--text-main);" id="trackComplaintHeading">Complaint #--</h3>
           <div id="trackStatusBadge"></div>
         </div>
 
-        <div class="confirmation-grid" style="background: var(--bg-card-subtle); border: 1px solid var(--border-color); margin-bottom: 1.25rem;">
+        <p id="trackComplaintText" style="font-style: italic; color: var(--text-main); margin-bottom: 1rem; font-size: 0.95rem; line-height: 1.5;"></p>
+
+        <div class="confirmation-grid">
           <div class="meta-item">
             <div class="meta-label">Category</div>
-            <div class="meta-value" id="trackCategory"></div>
+            <div class="meta-value" id="trackCategory">--</div>
           </div>
           <div class="meta-item">
             <div class="meta-label">Urgency</div>
-            <div class="meta-value" id="trackUrgency"></div>
+            <div class="meta-value" id="trackUrgency">--</div>
           </div>
           <div class="meta-item">
             <div class="meta-label">Assigned Authority</div>
-            <div class="meta-value" id="trackAuthority"></div>
+            <div class="meta-value" id="trackAuthority">--</div>
           </div>
           <div class="meta-item">
-            <div class="meta-label">Escalation Level</div>
-            <div class="meta-value" id="trackEscalation"></div>
+            <div class="meta-label">Escalation Tier</div>
+            <div class="meta-value" id="trackEscalation">Level 0</div>
           </div>
           <div class="meta-item">
-            <div class="meta-label">SLA Target</div>
-            <div class="meta-value" id="trackSla" style="font-size: 0.8rem;"></div>
+            <div class="meta-label">SLA Deadline</div>
+            <div class="meta-value" id="trackSla" style="font-size: 0.8rem;">--</div>
           </div>
           <div class="meta-item">
             <div class="meta-label">Resolved At</div>
-            <div class="meta-value" id="trackResolvedAt" style="font-size: 0.8rem;"></div>
+            <div class="meta-value" id="trackResolvedAt" style="font-size: 0.8rem;">--</div>
           </div>
         </div>
 
-        <h4 style="font-size: 0.9rem; font-weight: 600; color: var(--text-main); margin-bottom: 0.5rem;">Timeline & Activity Log</h4>
-        <ul id="trackTimeline" class="timeline"></ul>
+        <h4 style="font-size: 0.9rem; font-weight: 700; margin-top: 1.25rem; margin-bottom: 0.5rem;">Audit Trail & Escalation Log</h4>
+        <ul id="trackTimeline" class="timeline">
+          <!-- Populated by JS -->
+        </ul>
       </div>
     </section>
   </main>
 
   <footer>
-    CampusResolve &copy; 2026 — Automated Campus Grievance System
+    CampusResolve &copy; 2026 — Automated Institutional Resolution Engine
   </footer>
 
   <script src="app.js"></script>

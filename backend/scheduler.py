@@ -1,7 +1,7 @@
 """
 CampusResolve Escalation & SLA Scheduler
 Uses APScheduler to periodically inspect open complaints, execute automated hierarchical escalations,
-and broadcast events via WebSocket.
+dispatch notification emails to escalated authorities, and broadcast real-time events via WebSocket.
 """
 
 import os
@@ -12,11 +12,16 @@ from apscheduler.schedulers.background import BackgroundScheduler
 from backend.database import SessionLocal
 from backend.models import Complaint, ActivityLog
 from backend.websocket_manager import broadcast_activity_sync
+from backend.notifier import send_escalation_email, get_authority_email
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("CampusResolveScheduler")
 
 # Tiered Escalation Hierarchy
+# Warden ➔ Dean of Student Affairs ➔ Principal
+# Mess Committee ➔ Dean of Student Affairs ➔ Principal
+# HOD ➔ Dean of Academics ➔ Principal
+# Estate Office ➔ Vice Principal ➔ Principal
 ESCALATION_TIERS = {
     "Warden": "Dean of Student Affairs",
     "Mess Committee": "Dean of Student Affairs",
@@ -70,10 +75,15 @@ def check_and_escalate_grievances(db: Session = None):
     Background job:
     1. Finds all complaints where status="open" AND sla_deadline has passed AND no_auto_escalation is not true
     2. For each, increment escalation_level by 1
-    3. Reassign assigned_authority to the next tier
+    3. Reassign assigned_authority to the next tier:
+       Warden ➔ Dean of Student Affairs ➔ Principal
+       Mess Committee ➔ Dean of Student Affairs ➔ Principal
+       HOD ➔ Dean of Academics ➔ Principal
+       Estate Office ➔ Vice Principal ➔ Principal
     4. Extend sla_deadline by the original duration
-    5. Log activity_log entry: 'Escalated from {old_authority} to {new_authority} — no resolution within SLA'
-    6. Broadcast real-time WebSocket event
+    5. Send escalation email alert to newly assigned authority
+    6. Log activity_log entry
+    7. Broadcast real-time WebSocket event
     """
     close_db = False
     if db is None:
@@ -85,6 +95,7 @@ def check_and_escalate_grievances(db: Session = None):
         overdue_complaints = db.query(Complaint).filter(
             Complaint.status == "open",
             Complaint.no_auto_escalation.is_(False),
+            Complaint.category != "harassment",
             Complaint.sla_deadline.isnot(None),
             Complaint.sla_deadline < now
         ).all()
@@ -103,8 +114,21 @@ def check_and_escalate_grievances(db: Session = None):
             extension_delta = get_sla_duration(c.urgency)
             c.sla_deadline = now + extension_delta
             
-            # 4. Log activity_log entry
-            log_details = f"Escalated from {old_authority} to {new_authority} — no resolution within SLA"
+            # 4. Dispatch automated escalation email
+            new_authority_email = get_authority_email(new_authority)
+            send_escalation_email(
+                complaint_id=c.id,
+                complaint_text=c.text,
+                category=c.category or "general",
+                urgency=c.urgency or "medium",
+                old_authority=old_authority,
+                new_authority=new_authority,
+                escalation_level=c.escalation_level,
+                new_sla=c.sla_deadline
+            )
+
+            # 5. Log activity_log entry
+            log_details = f"Escalated from {old_authority} to {new_authority} — no resolution within SLA. Alert email dispatched to {new_authority_email}."
             log_entry = ActivityLog(
                 complaint_id=c.id,
                 action="ESCALATED",
@@ -114,7 +138,7 @@ def check_and_escalate_grievances(db: Session = None):
             db.add(log_entry)
             db.flush()
 
-            # 5. Broadcast real-time event via WebSocket
+            # 6. Broadcast real-time event via WebSocket
             truncated_text = (c.text[:60] + "...") if len(c.text) > 60 else c.text
             broadcast_activity_sync({
                 "id": log_entry.id,
@@ -124,16 +148,17 @@ def check_and_escalate_grievances(db: Session = None):
                 "timestamp": now.isoformat(),
                 "complaint_text": truncated_text,
                 "complaint_status": c.status,
+                "assigned_authority": new_authority,
             })
 
             logger.info(
                 f"[ESCALATION] Complaint #{c.id} escalated: Level {c.escalation_level}, "
-                f"routed from '{old_authority}' to '{new_authority}', new SLA: {c.sla_deadline.isoformat()}"
+                f"routed from '{old_authority}' to '{new_authority}' ({new_authority_email}), new SLA: {c.sla_deadline.isoformat()}"
             )
 
         if overdue_complaints:
             db.commit()
-            logger.info(f"Successfully processed {len(overdue_complaints)} escalated complaints.")
+            logger.info(f"Successfully processed {len(overdue_complaints)} escalated complaints with email notifications.")
     except Exception as e:
         logger.error(f"Error during SLA escalation check: {e}")
         db.rollback()

@@ -80,11 +80,11 @@ for i, tc in enumerate(test_cases, 1):
     print(f'   - [{data["category"].upper()}] #{data["id"]} -> Assigned: "{data["assigned_authority"]}" | Urgency: "{data["urgency"]}" | Auto-Escalation Locked: {data["no_auto_escalation"]}')
 
 # --- 3. LIST ALL COMPLAINTS ---
-r_list = client.get('/complaints')
+r_list = client.get('/complaints?include_harassment=true')
 assert r_list.status_code == 200
 all_complaints = r_list.json()
 assert len(all_complaints) == 5
-print(f'\n[PASS] [3/6] GET /complaints: Successfully listed {len(all_complaints)} complaints.')
+print(f'\n[PASS] [3/6] GET /complaints: Successfully listed {len(all_complaints)} complaints (with harassment).')
 
 # --- 4. AUDIT & ACTIVITY LOG VALIDATION ---
 harass_id = created_ids[4]

@@ -31,7 +31,13 @@
         <h1 style="font-size: 1.85rem; font-weight: 800;">Institutional Resolution Dashboard</h1>
         <p style="color: var(--text-muted);">Real-time monitoring of complaints, AI triage, authority dispatch, and resolution actions.</p>
       </div>
-      <button id="refreshBtn" class="btn btn-sm" style="background: rgba(255,255,255,0.08); color: var(--text-main);">🔄 Refresh Data</button>
+      <div style="display: flex; align-items: center; gap: 0.75rem;">
+        <span id="wsStatusBadge" class="badge" style="margin-bottom: 0; background: rgba(16,185,129,0.15); color: #34d399; border-color: rgba(16,185,129,0.3);">
+          <span style="display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: #34d399; margin-right: 4px; animation: pulse 1.5s infinite;"></span>
+          WebSocket Live
+        </span>
+        <button id="refreshBtn" class="btn btn-sm" style="background: rgba(255,255,255,0.08); color: var(--text-main);">🔄 Refresh</button>
+      </div>
     </div>
 
     <!-- Stats Summary Cards -->
@@ -54,35 +60,47 @@
       </div>
     </div>
 
-    <!-- Complaints Table -->
-    <section class="card" style="padding: 1.5rem;">
-      <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem; flex-wrap: wrap; gap: 0.75rem;">
-        <h2 class="card-title" style="margin-bottom: 0;">📋 Complaints Stream</h2>
-      </div>
+    <!-- Grid Layout: Complaints Stream + Live WebSocket Activity Feed -->
+    <div style="display: grid; grid-template-columns: 2fr 1fr; gap: 1.5rem; align-items: start;">
+      <!-- Complaints Table -->
+      <section class="card" style="padding: 1.5rem;">
+        <h2 class="card-title" style="margin-bottom: 1rem;">📋 Active Complaints Registry</h2>
 
-      <div class="table-container">
-        <table>
-          <thead>
-            <tr>
-              <th>ID</th>
-              <th>Complaint Text</th>
-              <th>Category</th>
-              <th>Urgency</th>
-              <th>Assigned Authority</th>
-              <th>Escalation</th>
-              <th>Status</th>
-              <th>SLA Deadline</th>
-              <th>Action</th>
-            </tr>
-          </thead>
-          <tbody id="complaintsTableBody">
-            <tr>
-              <td colspan="9" style="text-align: center; color: var(--text-muted); padding: 2rem;">Loading complaints...</td>
-            </tr>
-          </tbody>
-        </table>
-      </div>
-    </section>
+        <div class="table-container">
+          <table>
+            <thead>
+              <tr>
+                <th>ID</th>
+                <th>Complaint Text</th>
+                <th>Category</th>
+                <th>Urgency</th>
+                <th>Authority</th>
+                <th>Esc.</th>
+                <th>Status</th>
+                <th>Action</th>
+              </tr>
+            </thead>
+            <tbody id="complaintsTableBody">
+              <tr>
+                <td colspan="8" style="text-align: center; color: var(--text-muted); padding: 2rem;">Loading complaints...</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <!-- Real-Time Activity Feed Card -->
+      <section class="card" style="padding: 1.5rem;">
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem;">
+          <h2 class="card-title" style="font-size: 1.1rem; margin-bottom: 0;">⚡ Real-Time Activity Feed</h2>
+          <span style="font-size: 0.75rem; color: var(--text-muted);">Top 50 Recent</span>
+        </div>
+
+        <div id="activityFeedList" style="max-height: 540px; overflow-y: auto; display: flex; flex-direction: column; gap: 0.75rem; padding-right: 0.25rem;">
+          <div style="color: var(--text-muted); font-size: 0.85rem; text-align: center; padding: 2rem;">Connecting to live stream...</div>
+        </div>
+      </section>
+    </div>
   </main>
 
   <footer>

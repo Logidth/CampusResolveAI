@@ -1,6 +1,7 @@
 """
 CampusResolve Escalation & SLA Scheduler
-Uses APScheduler to periodically inspect open complaints and execute automated hierarchical escalations.
+Uses APScheduler to periodically inspect open complaints, execute automated hierarchical escalations,
+and broadcast events via WebSocket.
 """
 
 import os
@@ -10,6 +11,7 @@ from sqlalchemy.orm import Session
 from apscheduler.schedulers.background import BackgroundScheduler
 from backend.database import SessionLocal
 from backend.models import Complaint, ActivityLog
+from backend.websocket_manager import broadcast_activity_sync
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("CampusResolveScheduler")
@@ -58,7 +60,6 @@ def get_next_authority(current_authority: str) -> str:
     if current_authority in ESCALATION_TIERS:
         return ESCALATION_TIERS[current_authority]
     
-    # Heuristic fallback for custom or intermediate authority labels
     if "Dean" in current_authority or "Vice Principal" in current_authority:
         return "Principal"
     return "Principal"
@@ -72,6 +73,7 @@ def check_and_escalate_grievances(db: Session = None):
     3. Reassign assigned_authority to the next tier
     4. Extend sla_deadline by the original duration
     5. Log activity_log entry: 'Escalated from {old_authority} to {new_authority} — no resolution within SLA'
+    6. Broadcast real-time WebSocket event
     """
     close_db = False
     if db is None:
@@ -102,13 +104,28 @@ def check_and_escalate_grievances(db: Session = None):
             c.sla_deadline = now + extension_delta
             
             # 4. Log activity_log entry
+            log_details = f"Escalated from {old_authority} to {new_authority} — no resolution within SLA"
             log_entry = ActivityLog(
                 complaint_id=c.id,
                 action="ESCALATED",
-                details=f"Escalated from {old_authority} to {new_authority} — no resolution within SLA",
+                details=log_details,
                 timestamp=now
             )
             db.add(log_entry)
+            db.flush()
+
+            # 5. Broadcast real-time event via WebSocket
+            truncated_text = (c.text[:60] + "...") if len(c.text) > 60 else c.text
+            broadcast_activity_sync({
+                "id": log_entry.id,
+                "complaint_id": c.id,
+                "action": "ESCALATED",
+                "details": log_details,
+                "timestamp": now.isoformat(),
+                "complaint_text": truncated_text,
+                "complaint_status": c.status,
+            })
+
             logger.info(
                 f"[ESCALATION] Complaint #{c.id} escalated: Level {c.escalation_level}, "
                 f"routed from '{old_authority}' to '{new_authority}', new SLA: {c.sla_deadline.isoformat()}"

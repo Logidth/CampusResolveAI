@@ -1,7 +1,8 @@
+import asyncio
 from datetime import datetime
 from typing import List, Optional
 from contextlib import asynccontextmanager
-from fastapi import FastAPI, Depends, HTTPException
+from fastapi import FastAPI, Depends, HTTPException, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
@@ -10,24 +11,26 @@ from backend.database import engine, Base, get_db
 from backend.models import Complaint, ActivityLog
 from backend.agent import classify_complaint
 from backend.scheduler import start_scheduler, stop_scheduler, get_sla_duration
+from backend.websocket_manager import manager, set_main_event_loop, broadcast_activity_sync
 
 # Initialize SQLite database tables
 Base.metadata.create_all(bind=engine)
 
 
-# FastAPI Lifespan to manage background scheduler lifecycle
+# FastAPI Lifespan to manage background scheduler lifecycle & event loop
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # App Startup: Start APScheduler
+    # App Startup: Capture main event loop for WebSocket broadcasting & start scheduler
+    set_main_event_loop(asyncio.get_running_loop())
     start_scheduler()
     yield
-    # App Shutdown: Gracefully stop APScheduler
+    # App Shutdown: Gracefully stop scheduler
     stop_scheduler()
 
 
 app = FastAPI(
     title="CampusResolve API",
-    description="Agentic grievance resolution and automated escalation platform for colleges",
+    description="Agentic grievance resolution, real-time activity feed, and automated escalation platform for colleges",
     version="1.0.0",
     lifespan=lifespan
 )
@@ -89,6 +92,16 @@ class ComplaintDetailOut(ComplaintOut):
     activity_logs: List[ActivityLogOut] = []
 
 
+class ActivityFeedItem(BaseModel):
+    id: int
+    complaint_id: int
+    action: str
+    details: Optional[str] = None
+    timestamp: str
+    complaint_text: str
+    complaint_status: str
+
+
 # --- Endpoints ---
 
 @app.get("/")
@@ -101,7 +114,7 @@ def health_check():
 def create_complaint(payload: ComplaintCreate, db: Session = Depends(get_db)):
     """
     Create a new complaint, call LLM classification, route to initial authority,
-    calculate SLA deadline (supporting DEBUG_TIME_SCALE), enforce safety flags, and log the activity.
+    calculate SLA deadline, enforce safety flags, log activity, and broadcast event.
     """
     created_at = datetime.utcnow()
 
@@ -153,6 +166,19 @@ def create_complaint(payload: ComplaintCreate, db: Session = Depends(get_db)):
     db.add(activity_entry)
     db.commit()
     db.refresh(complaint)
+    db.refresh(activity_entry)
+
+    # 7. Real-Time WebSocket Broadcast
+    truncated_text = (complaint.text[:60] + "...") if len(complaint.text) > 60 else complaint.text
+    broadcast_activity_sync({
+        "id": activity_entry.id,
+        "complaint_id": complaint.id,
+        "action": activity_entry.action,
+        "details": activity_entry.details,
+        "timestamp": activity_entry.timestamp.isoformat(),
+        "complaint_text": truncated_text,
+        "complaint_status": complaint.status,
+    })
 
     return complaint
 
@@ -174,7 +200,7 @@ def get_complaint(id: int, db: Session = Depends(get_db)):
 
 @app.patch("/complaints/{id}/resolve", response_model=ComplaintOut)
 def resolve_complaint(id: int, db: Session = Depends(get_db)):
-    """Mark a complaint as resolved and record the activity log."""
+    """Mark a complaint as resolved, record activity log, and broadcast event."""
     complaint = db.query(Complaint).filter(Complaint.id == id).first()
     if not complaint:
         raise HTTPException(status_code=404, detail="Complaint not found")
@@ -191,5 +217,63 @@ def resolve_complaint(id: int, db: Session = Depends(get_db)):
     db.add(log_entry)
     db.commit()
     db.refresh(complaint)
+    db.refresh(log_entry)
+
+    # Broadcast resolution event
+    truncated_text = (complaint.text[:60] + "...") if len(complaint.text) > 60 else complaint.text
+    broadcast_activity_sync({
+        "id": log_entry.id,
+        "complaint_id": complaint.id,
+        "action": log_entry.action,
+        "details": log_entry.details,
+        "timestamp": log_entry.timestamp.isoformat(),
+        "complaint_text": truncated_text,
+        "complaint_status": complaint.status,
+    })
 
     return complaint
+
+
+@app.get("/activity-feed", response_model=List[ActivityFeedItem])
+def get_activity_feed(db: Session = Depends(get_db)):
+    """
+    Returns the 50 most recent activity_log entries across all complaints,
+    newest first, joined with the complaint's truncated text (60 chars) and current status.
+    """
+    results = (
+        db.query(ActivityLog, Complaint.text, Complaint.status)
+        .join(Complaint, ActivityLog.complaint_id == Complaint.id)
+        .order_by(ActivityLog.timestamp.desc(), ActivityLog.id.desc())
+        .limit(50)
+        .all()
+    )
+
+    feed = []
+    for log, text, status in results:
+        raw_text = text or ""
+        truncated = (raw_text[:60] + "...") if len(raw_text) > 60 else raw_text
+        feed.append({
+            "id": log.id,
+            "complaint_id": log.complaint_id,
+            "action": log.action,
+            "details": log.details,
+            "timestamp": log.timestamp.isoformat() if log.timestamp else datetime.utcnow().isoformat(),
+            "complaint_text": truncated,
+            "complaint_status": status or "open",
+        })
+
+    return feed
+
+
+@app.websocket("/ws/activity")
+async def websocket_activity_feed(websocket: WebSocket):
+    """WebSocket endpoint pushing real-time activity stream events."""
+    await manager.connect(websocket)
+    try:
+        while True:
+            # Keep socket alive and receive client heartbeats/messages
+            await websocket.receive_text()
+    except WebSocketDisconnect:
+        manager.disconnect(websocket)
+    except Exception:
+        manager.disconnect(websocket)

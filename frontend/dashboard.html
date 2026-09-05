@@ -1,0 +1,104 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>CampusResolve — Admin Agent Dashboard</title>
+  <link rel="stylesheet" href="style.css">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+</head>
+<body>
+
+  <!-- Navigation -->
+  <header>
+    <div class="nav-container">
+      <a href="index.html" class="brand">
+        <div class="brand-icon">⚡</div>
+        <div class="brand-title">Campus<span>Resolve</span></div>
+      </a>
+      <nav class="nav-links">
+        <a href="index.html" class="nav-link">Student Portal</a>
+        <a href="dashboard.html" class="nav-link active">Admin Dashboard</a>
+      </nav>
+    </div>
+  </header>
+
+  <main class="container">
+    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 2rem; flex-wrap: wrap; gap: 1rem;">
+      <div>
+        <h1 style="font-size: 1.85rem; font-weight: 800;">Institutional Resolution Control Center</h1>
+        <p style="color: var(--text-muted);">Real-time monitoring of AI triage, department SLA enforcement, and automated escalations.</p>
+      </div>
+      <button id="triggerEscalationBtn" class="btn btn-primary btn-sm">⚡ Run Escalation Scanner</button>
+    </div>
+
+    <!-- Stats Summary Cards -->
+    <div class="stats-grid">
+      <div class="stat-box">
+        <div class="stat-label">Total Grievances</div>
+        <div id="statTotal" class="stat-value">0</div>
+      </div>
+      <div class="stat-box">
+        <div class="stat-label">Active / In-Progress</div>
+        <div id="statActive" class="stat-value" style="color: #60a5fa;">0</div>
+      </div>
+      <div class="stat-box">
+        <div class="stat-label">Escalated (SLA Breached)</div>
+        <div id="statEscalated" class="stat-value" style="color: #f87171;">0</div>
+      </div>
+      <div class="stat-box">
+        <div class="stat-label">Resolved</div>
+        <div id="statResolved" class="stat-value" style="color: #34d399;">0</div>
+      </div>
+    </div>
+
+    <!-- Grievances Table -->
+    <section class="card" style="padding: 1.5rem;">
+      <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem; flex-wrap: wrap; gap: 0.75rem;">
+        <h2 class="card-title" style="margin-bottom: 0;">📋 Grievance Triage Stream</h2>
+        <div style="display: flex; gap: 0.5rem;">
+          <select id="filterStatus" class="form-control" style="width: auto; padding: 0.4rem 0.8rem; font-size: 0.85rem;">
+            <option value="">All Statuses</option>
+            <option value="ASSIGNED">Assigned</option>
+            <option value="IN_PROGRESS">In Progress</option>
+            <option value="ESCALATED">Escalated</option>
+            <option value="RESOLVED">Resolved</option>
+          </select>
+          <button id="refreshBtn" class="btn btn-sm" style="background: rgba(255,255,255,0.05); color: var(--text-main);">🔄 Refresh</button>
+        </div>
+      </div>
+
+      <div class="table-container">
+        <table>
+          <thead>
+            <tr>
+              <th>Ticket ID</th>
+              <th>Student</th>
+              <th>Subject</th>
+              <th>Category</th>
+              <th>Priority</th>
+              <th>Assigned Dept</th>
+              <th>Status</th>
+              <th>SLA Target</th>
+              <th>Action</th>
+            </tr>
+          </thead>
+          <tbody id="grievancesTableBody">
+            <tr>
+              <td colspan="9" style="text-align: center; color: var(--text-muted); padding: 2rem;">Loading grievances...</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+  </main>
+
+  <footer>
+    CampusResolve &copy; 2026 — Institutional Command Interface
+  </footer>
+
+  <script src="app.js"></script>
+</body>
+</html>

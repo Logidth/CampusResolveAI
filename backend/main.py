@@ -1,5 +1,6 @@
-from datetime import datetime, timedelta
+from datetime import datetime
 from typing import List, Optional
+from contextlib import asynccontextmanager
 from fastapi import FastAPI, Depends, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
@@ -8,14 +9,27 @@ from sqlalchemy.orm import Session
 from backend.database import engine, Base, get_db
 from backend.models import Complaint, ActivityLog
 from backend.agent import classify_complaint
+from backend.scheduler import start_scheduler, stop_scheduler, get_sla_duration
 
 # Initialize SQLite database tables
 Base.metadata.create_all(bind=engine)
 
+
+# FastAPI Lifespan to manage background scheduler lifecycle
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # App Startup: Start APScheduler
+    start_scheduler()
+    yield
+    # App Shutdown: Gracefully stop APScheduler
+    stop_scheduler()
+
+
 app = FastAPI(
     title="CampusResolve API",
-    description="Agentic grievance resolution and complaint tracking system for colleges",
-    version="1.0.0"
+    description="Agentic grievance resolution and automated escalation platform for colleges",
+    version="1.0.0",
+    lifespan=lifespan
 )
 
 # CORS configuration for frontend
@@ -27,19 +41,13 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Authority and SLA mappings requested
+# Initial Authority Mapping based on classified Category
 AUTHORITY_MAP = {
     "hostel": "Warden",
     "mess": "Mess Committee",
     "academic": "HOD",
     "infrastructure": "Estate Office",
     "harassment": "Counseling Cell",
-}
-
-SLA_HOURS = {
-    "high": 6,
-    "medium": 48,
-    "low": 168,
 }
 
 
@@ -92,8 +100,8 @@ def health_check():
 @app.post("/complaints", response_model=ComplaintOut, status_code=201)
 def create_complaint(payload: ComplaintCreate, db: Session = Depends(get_db)):
     """
-    Create a new complaint, call LLM classification, route to appropriate authority,
-    set SLA deadline, enforce harassment safety flags, and log the activity.
+    Create a new complaint, call LLM classification, route to initial authority,
+    calculate SLA deadline (supporting DEBUG_TIME_SCALE), enforce safety flags, and log the activity.
     """
     created_at = datetime.utcnow()
 
@@ -103,7 +111,7 @@ def create_complaint(payload: ComplaintCreate, db: Session = Depends(get_db)):
     urgency = classification.get("urgency", "medium").lower()
     reasoning = classification.get("reasoning", "")
 
-    # 2. Determine Assigned Authority
+    # 2. Determine Initial Assigned Authority
     assigned_authority = AUTHORITY_MAP.get(category, "Estate Office")
 
     # 3. Apply Special Harassment Rule
@@ -113,9 +121,9 @@ def create_complaint(payload: ComplaintCreate, db: Session = Depends(get_db)):
         assigned_authority = "Counseling Cell"
         no_auto_escalation = True
 
-    # 4. Calculate SLA Deadline from created_at + timedelta
-    sla_hours = SLA_HOURS.get(urgency, 48)
-    sla_deadline = created_at + timedelta(hours=sla_hours)
+    # 4. Calculate SLA Deadline with DEBUG_TIME_SCALE support
+    sla_delta = get_sla_duration(urgency)
+    sla_deadline = created_at + sla_delta
 
     # 5. Create Complaint Record
     complaint = Complaint(

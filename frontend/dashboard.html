@@ -3,19 +3,19 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>CampusResolve — Admin Dashboard</title>
+  <title>CampusResolve — Admin Monitoring Dashboard</title>
   <link rel="stylesheet" href="style.css">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
 </head>
 <body>
 
-  <!-- Navigation -->
+  <!-- Minimal Header -->
   <header>
     <div class="nav-container">
       <a href="index.html" class="brand">
-        <div class="brand-icon">⚡</div>
+        <div class="brand-icon">CR</div>
         <div class="brand-title">Campus<span>Resolve</span></div>
       </a>
       <nav class="nav-links">
@@ -26,21 +26,20 @@
   </header>
 
   <main class="container">
-    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 2rem; flex-wrap: wrap; gap: 1rem;">
+    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1.5rem; flex-wrap: wrap; gap: 0.75rem;">
       <div>
-        <h1 style="font-size: 1.85rem; font-weight: 800;">Institutional Resolution Dashboard</h1>
-        <p style="color: var(--text-muted);">Real-time monitoring of complaints, AI triage, authority dispatch, and resolution actions.</p>
+        <h1 style="font-size: 1.6rem; font-weight: 700; color: var(--text-main); letter-spacing: -0.02em;">Institutional Monitoring Console</h1>
+        <p style="color: var(--text-muted); font-size: 0.875rem;">Real-time agent triage, autonomous SLA escalations, and resolution management.</p>
       </div>
-      <div style="display: flex; align-items: center; gap: 0.75rem;">
-        <span id="wsStatusBadge" class="badge" style="margin-bottom: 0; background: rgba(16,185,129,0.15); color: #34d399; border-color: rgba(16,185,129,0.3);">
-          <span style="display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: #34d399; margin-right: 4px; animation: pulse 1.5s infinite;"></span>
-          WebSocket Live
+      <div style="display: flex; align-items: center; gap: 0.5rem;">
+        <span id="autoRefreshIndicator" class="badge badge-open" style="font-size: 0.75rem;">
+          ⏱️ Auto-refresh: 5s
         </span>
-        <button id="refreshBtn" class="btn btn-sm" style="background: rgba(255,255,255,0.08); color: var(--text-main);">🔄 Refresh</button>
+        <button id="manualRefreshBtn" class="btn btn-outline btn-sm">🔄 Refresh Now</button>
       </div>
     </div>
 
-    <!-- Stats Summary Cards -->
+    <!-- Summary Statistics Grid -->
     <div class="stats-grid">
       <div class="stat-box">
         <div class="stat-label">Total Complaints</div>
@@ -48,63 +47,84 @@
       </div>
       <div class="stat-box">
         <div class="stat-label">Open Complaints</div>
-        <div id="statOpen" class="stat-value" style="color: #60a5fa;">0</div>
+        <div id="statOpen" class="stat-value" style="color: var(--primary);">0</div>
       </div>
       <div class="stat-box">
         <div class="stat-label">Escalated (Level &gt; 0)</div>
-        <div id="statEscalated" class="stat-value" style="color: #f87171;">0</div>
+        <div id="statEscalated" class="stat-value" style="color: var(--danger);">0</div>
       </div>
       <div class="stat-box">
         <div class="stat-label">Resolved</div>
-        <div id="statResolved" class="stat-value" style="color: #34d399;">0</div>
+        <div id="statResolved" class="stat-value" style="color: var(--success);">0</div>
       </div>
     </div>
 
-    <!-- Grid Layout: Complaints Stream + Live WebSocket Activity Feed -->
-    <div style="display: grid; grid-template-columns: 2fr 1fr; gap: 1.5rem; align-items: start;">
-      <!-- Complaints Table -->
-      <section class="card" style="padding: 1.5rem;">
-        <h2 class="card-title" style="margin-bottom: 1rem;">📋 Active Complaints Registry</h2>
-
-        <div class="table-container">
-          <table>
-            <thead>
-              <tr>
-                <th>ID</th>
-                <th>Complaint Text</th>
-                <th>Category</th>
-                <th>Urgency</th>
-                <th>Authority</th>
-                <th>Esc.</th>
-                <th>Status</th>
-                <th>Action</th>
-              </tr>
-            </thead>
-            <tbody id="complaintsTableBody">
-              <tr>
-                <td colspan="8" style="text-align: center; color: var(--text-muted); padding: 2rem;">Loading complaints...</td>
-              </tr>
-            </tbody>
-          </table>
+    <!-- 1. Terminal-Style Live Activity Feed (Connected to /ws/activity) -->
+    <section class="terminal-window">
+      <div class="terminal-header">
+        <div class="terminal-controls">
+          <span class="terminal-dot dot-red"></span>
+          <span class="terminal-dot dot-yellow"></span>
+          <span class="terminal-dot dot-green"></span>
         </div>
-      </section>
-
-      <!-- Real-Time Activity Feed Card -->
-      <section class="card" style="padding: 1.5rem;">
-        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem;">
-          <h2 class="card-title" style="font-size: 1.1rem; margin-bottom: 0;">⚡ Real-Time Activity Feed</h2>
-          <span style="font-size: 0.75rem; color: var(--text-muted);">Top 50 Recent</span>
+        <div class="terminal-title">
+          <span>● /ws/activity ~ real-time agent monitoring stream</span>
         </div>
-
-        <div id="activityFeedList" style="max-height: 540px; overflow-y: auto; display: flex; flex-direction: column; gap: 0.75rem; padding-right: 0.25rem;">
-          <div style="color: var(--text-muted); font-size: 0.85rem; text-align: center; padding: 2rem;">Connecting to live stream...</div>
+        <div style="display: flex; align-items: center; gap: 0.5rem;">
+          <span id="termStatusBadge" class="terminal-status-badge">
+            <span style="display: inline-block; width: 6px; height: 6px; border-radius: 50%; background: var(--term-green);"></span>
+            STREAM ACTIVE
+          </span>
+          <button id="clearTerminalBtn" style="background: transparent; border: 1px solid var(--term-border); color: #94a3b8; font-size: 0.7rem; padding: 0.15rem 0.4rem; border-radius: 4px; cursor: pointer;">Clear</button>
         </div>
-      </section>
-    </div>
+      </div>
+
+      <div id="terminalBody" class="terminal-body">
+        <div class="term-empty">Connecting to real-time agent stream...</div>
+      </div>
+    </section>
+
+    <!-- 2. Open Complaints Table (Auto-refreshing every 5 seconds) -->
+    <section class="card" style="padding: 1.5rem;">
+      <div class="card-header">
+        <div>
+          <h2 class="card-title">Active Complaints Registry</h2>
+          <p class="card-subtitle">Live table of open grievances requiring institutional attention (updates every 5s)</p>
+        </div>
+        <div style="display: flex; gap: 0.5rem; align-items: center;">
+          <label style="font-size: 0.8rem; color: var(--text-muted); cursor: pointer; display: flex; align-items: center; gap: 0.35rem;">
+            <input type="checkbox" id="showOnlyOpen" checked> Only Open
+          </label>
+        </div>
+      </div>
+
+      <div class="table-container">
+        <table>
+          <thead>
+            <tr>
+              <th style="width: 60px;">ID</th>
+              <th>Complaint Description</th>
+              <th>Category</th>
+              <th>Urgency</th>
+              <th>Assigned Authority</th>
+              <th>Escalation</th>
+              <th>Status</th>
+              <th>SLA Target</th>
+              <th style="text-align: right;">Action</th>
+            </tr>
+          </thead>
+          <tbody id="complaintsTableBody">
+            <tr>
+              <td colspan="9" style="text-align: center; color: var(--text-muted); padding: 2rem;">Loading complaints registry...</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
   </main>
 
   <footer>
-    CampusResolve &copy; 2026 — Institutional Command Interface
+    CampusResolve &copy; 2026 — Automated Institutional Resolution Engine
   </footer>
 
   <script src="app.js"></script>

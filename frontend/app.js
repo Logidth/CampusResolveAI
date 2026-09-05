@@ -13,6 +13,13 @@ function getUrgencyBadge(urgency) {
   return `<span class="badge badge-${u}">${urgency || "medium"}</span>`;
 }
 
+// Helper: Escalation level badge generator
+function getEscalationBadge(level) {
+  const lvl = level || 0;
+  const cls = lvl === 0 ? "badge-esc-0" : (lvl === 1 ? "badge-esc-1" : "badge-esc-2");
+  return `<span class="badge ${cls}">Level ${lvl}</span>`;
+}
+
 // Helper: Date formatter
 function formatDate(dateStr) {
   if (!dateStr) return "N/A";
@@ -23,6 +30,13 @@ function formatDate(dateStr) {
     hour: "2-digit", 
     minute: "2-digit" 
   });
+}
+
+// Helper: Terminal log timestamp formatter [YYYY-MM-DD HH:MM:SS]
+function formatTerminalTimestamp(dateStr) {
+  const d = dateStr ? new Date(dateStr) : new Date();
+  const pad = (n) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
 }
 
 // ==========================================
@@ -36,7 +50,6 @@ const trackForm = document.getElementById("trackForm");
 const trackIdInput = document.getElementById("trackIdInput");
 const trackResultBox = document.getElementById("trackResultBox");
 
-// --- Submit Complaint ---
 if (complaintForm) {
   complaintForm.addEventListener("submit", async (e) => {
     e.preventDefault();
@@ -90,7 +103,6 @@ if (complaintForm) {
   });
 }
 
-// --- Fetch & Render Complaint Status ---
 async function loadComplaintDetails(id) {
   if (!id) return;
   const trackBtn = document.getElementById("trackBtn");
@@ -115,7 +127,6 @@ async function loadComplaintDetails(id) {
       document.getElementById("trackSla").innerText = formatDate(data.sla_deadline);
       document.getElementById("trackResolvedAt").innerText = data.resolved_at ? formatDate(data.resolved_at) : "Open / In Progress";
 
-      // Render timeline
       const timelineEl = document.getElementById("trackTimeline");
       timelineEl.innerHTML = "";
       if (data.activity_logs && data.activity_logs.length > 0) {
@@ -141,7 +152,6 @@ async function loadComplaintDetails(id) {
   }
 }
 
-// --- Track Form Submit ---
 if (trackForm) {
   trackForm.addEventListener("submit", (e) => {
     e.preventDefault();
@@ -153,49 +163,147 @@ if (trackForm) {
 }
 
 // ==========================================
-// 2. ADMIN DASHBOARD (dashboard.html)
+// 2. ADMIN MONITORING DASHBOARD (dashboard.html)
 // ==========================================
 
 const complaintsTableBody = document.getElementById("complaintsTableBody");
-const activityFeedList = document.getElementById("activityFeedList");
+const terminalBody = document.getElementById("terminalBody");
+const showOnlyOpenCheckbox = document.getElementById("showOnlyOpen");
 
-if (complaintsTableBody) {
+if (complaintsTableBody && terminalBody) {
+
+  // --- Render Terminal Log Line with Action Color Coding ---
+  function createTerminalLogElement(item) {
+    const actionStr = (item.action || "").toUpperCase();
+    
+    // Color coding:
+    // Green for "classified" / "classification"
+    // Yellow for "escalated" / "escalation"
+    // Blue for "resolved" / "resolution"
+    let tagClass = "term-tag-classified";
+    let tagLabel = "CLASSIFIED";
+
+    if (actionStr.includes("ESCALAT")) {
+      tagClass = "term-tag-escalated";
+      tagLabel = "ESCALATED";
+    } else if (actionStr.includes("RESOLV")) {
+      tagClass = "term-tag-resolved";
+      tagLabel = "RESOLVED";
+    } else if (actionStr.includes("CLASS") || actionStr.includes("CREATE")) {
+      tagClass = "term-tag-classified";
+      tagLabel = "CLASSIFIED";
+    } else {
+      tagClass = "term-tag-classified";
+      tagLabel = actionStr || "INFO";
+    }
+
+    const timeStr = formatTerminalTimestamp(item.timestamp);
+    const complaintRef = item.complaint_id ? `#TICKET-${item.complaint_id}` : "#SYS";
+    const details = item.details || "";
+    const textSnippet = item.complaint_text ? ` [text: "${item.complaint_text}"]` : "";
+
+    const div = document.createElement("div");
+    div.className = "term-line";
+    div.innerHTML = `
+      <span class="term-timestamp">[${timeStr}]</span>
+      <span class="term-tag ${tagClass}">[${tagLabel}]</span>
+      <span class="term-ticket-id">${complaintRef}:</span>
+      <span class="term-msg">${details}</span>
+      <span style="color: #64748b; font-size: 0.775rem;">${textSnippet}</span>
+    `;
+    return div;
+  }
+
+  // --- Append Log to Terminal (Maintains Autoscroll) ---
+  function appendTerminalLog(item, isPrepend = false) {
+    if (terminalBody.children.length === 1 && terminalBody.children[0].classList.contains("term-empty")) {
+      terminalBody.innerHTML = "";
+    }
+
+    const logEl = createTerminalLogElement(item);
+    if (isPrepend) {
+      terminalBody.insertBefore(logEl, terminalBody.firstChild);
+    } else {
+      terminalBody.appendChild(logEl);
+      terminalBody.scrollTop = terminalBody.scrollHeight;
+    }
+
+    // Retain maximum 100 log lines in terminal buffer
+    while (terminalBody.children.length > 100) {
+      terminalBody.removeChild(terminalBody.firstChild);
+    }
+  }
+
+  // --- Fetch Initial 50 Terminal Logs via GET /activity-feed ---
+  async function loadInitialTerminalLogs() {
+    try {
+      const res = await fetch(`${API_BASE}/activity-feed`);
+      if (!res.ok) throw new Error("Failed to load initial terminal logs");
+      const feed = await res.json();
+
+      if (feed.length === 0) {
+        terminalBody.innerHTML = `<div class="term-empty">Console initialized. No grievance activity logged yet.</div>`;
+        return;
+      }
+
+      terminalBody.innerHTML = "";
+      // Render oldest to newest so newest is at the bottom of the terminal window
+      const chronological = feed.slice().reverse();
+      chronological.forEach((item) => {
+        appendTerminalLog(item, false);
+      });
+    } catch (err) {
+      terminalBody.innerHTML = `<div class="term-empty" style="color: #f87171;">Failed to connect to activity feed: ${err.message}</div>`;
+    }
+  }
+
+  // --- Load Open Complaints Table (Auto-refreshing every 5s) ---
   async function loadDashboardComplaints() {
     try {
       const res = await fetch(`${API_BASE}/complaints`);
       if (!res.ok) throw new Error("Unable to fetch complaints");
       const list = await res.json();
 
-      let total = list.length;
-      let openCount = list.filter((c) => c.status === "open").length;
-      let escalatedCount = list.filter((c) => c.escalation_level > 0).length;
-      let resolvedCount = list.filter((c) => c.status === "resolved").length;
+      // Stats
+      const total = list.length;
+      const openList = list.filter((c) => c.status === "open");
+      const openCount = openList.length;
+      const escalatedCount = list.filter((c) => c.escalation_level > 0 && c.status === "open").length;
+      const resolvedCount = list.filter((c) => c.status === "resolved").length;
 
       document.getElementById("statTotal").innerText = total;
       document.getElementById("statOpen").innerText = openCount;
       document.getElementById("statEscalated").innerText = escalatedCount;
       document.getElementById("statResolved").innerText = resolvedCount;
 
-      if (list.length === 0) {
-        complaintsTableBody.innerHTML = `<tr><td colspan="8" style="text-align: center; color: var(--text-muted); padding: 2rem;">No complaints found in registry.</td></tr>`;
+      // Filter by open complaints if checkbox is checked
+      const showOnlyOpen = showOnlyOpenCheckbox ? showOnlyOpenCheckbox.checked : true;
+      const displayList = showOnlyOpen ? openList : list;
+
+      if (displayList.length === 0) {
+        const msg = showOnlyOpen ? "No active open complaints in queue." : "No complaints recorded in database.";
+        complaintsTableBody.innerHTML = `<tr><td colspan="9" style="text-align: center; color: var(--text-muted); padding: 2rem;">${msg}</td></tr>`;
         return;
       }
 
-      complaintsTableBody.innerHTML = list
+      complaintsTableBody.innerHTML = displayList
         .map(
           (c) => `
         <tr>
           <td><strong style="color: var(--primary);">#${c.id}</strong></td>
-          <td style="max-width: 220px; word-break: break-word; font-size: 0.85rem;">${c.text}</td>
-          <td>${c.category || 'General'}</td>
+          <td style="max-width: 240px; word-break: break-word; font-size: 0.85rem;" title="${c.text}">
+            ${c.text.length > 70 ? c.text.substring(0, 70) + '...' : c.text}
+          </td>
+          <td><span style="font-weight: 500;">${c.category || 'General'}</span></td>
           <td>${getUrgencyBadge(c.urgency)}</td>
-          <td><small>${c.assigned_authority || 'Unassigned'}</small></td>
-          <td><span style="color: ${c.escalation_level > 0 ? 'var(--danger)' : 'var(--text-muted)'}; font-weight: 600;">Lvl ${c.escalation_level}</span></td>
+          <td><span style="font-weight: 600; color: var(--text-main);">${c.assigned_authority || 'Unassigned'}</span></td>
+          <td>${getEscalationBadge(c.escalation_level)}</td>
           <td>${getStatusBadge(c.status)}</td>
-          <td>
+          <td><span style="font-size: 0.8rem; color: var(--text-muted);">${formatDate(c.sla_deadline)}</span></td>
+          <td style="text-align: right;">
             ${
               c.status !== "resolved"
-                ? `<button onclick="resolveComplaint(${c.id})" class="btn btn-outline" style="padding: 0.25rem 0.6rem; font-size: 0.75rem;">Resolve</button>`
+                ? `<button onclick="resolveComplaint(${c.id})" class="btn btn-primary btn-sm">Resolve</button>`
                 : `<span style="color: var(--success); font-size: 0.8rem; font-weight: 600;">✓ Resolved</span>`
             }
           </td>
@@ -204,81 +312,27 @@ if (complaintsTableBody) {
         )
         .join("");
     } catch (err) {
-      complaintsTableBody.innerHTML = `<tr><td colspan="8" style="text-align: center; color: var(--danger); padding: 2rem;">Backend offline. Run backend main.py!</td></tr>`;
+      complaintsTableBody.innerHTML = `<tr><td colspan="9" style="text-align: center; color: var(--danger); padding: 2rem;">Backend connection error. Ensure FastAPI server is running.</td></tr>`;
     }
   }
 
-  function renderFeedItem(item) {
-    const isEscalation = item.action === "ESCALATED";
-    const isResolved = item.action === "RESOLVED";
-    const badgeBg = isEscalation ? "var(--danger-bg)" : (isResolved ? "var(--success-bg)" : "var(--primary-light)");
-    const badgeColor = isEscalation ? "var(--danger)" : (isResolved ? "var(--success)" : "var(--primary)");
-
-    return `
-      <div style="background: #ffffff; border: 1px solid var(--border-color); border-radius: var(--radius-sm); padding: 0.75rem; font-size: 0.825rem; transition: var(--transition);">
-        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.25rem;">
-          <span style="font-weight: 700; color: ${badgeColor}; font-size: 0.75rem; background: ${badgeBg}; padding: 0.1rem 0.4rem; border-radius: 4px;">
-            [${item.action}] #TICKET-${item.complaint_id}
-          </span>
-          <span style="color: var(--text-light); font-size: 0.7rem;">${formatDate(item.timestamp)}</span>
-        </div>
-        <div style="color: var(--text-main); margin-bottom: 0.25rem; font-weight: 500;">${item.details || ''}</div>
-        <div style="color: var(--text-muted); font-size: 0.75rem; font-style: italic; border-top: 1px dashed var(--border-color); padding-top: 0.25rem;">
-          "${item.complaint_text || ''}"
-        </div>
-      </div>
-    `;
-  }
-
-  async function loadActivityFeed() {
-    if (!activityFeedList) return;
-    try {
-      const res = await fetch(`${API_BASE}/activity-feed`);
-      if (!res.ok) throw new Error("Failed to load activity feed");
-      const feed = await res.json();
-
-      if (feed.length === 0) {
-        activityFeedList.innerHTML = `<div style="color: var(--text-muted); font-size: 0.85rem; text-align: center; padding: 2rem;">No activities logged yet.</div>`;
-        return;
-      }
-
-      activityFeedList.innerHTML = feed.map(renderFeedItem).join("");
-    } catch (err) {
-      activityFeedList.innerHTML = `<div style="color: var(--danger); font-size: 0.85rem; padding: 1rem;">Failed to load activity feed.</div>`;
-    }
-  }
-
-  // --- WebSocket Connection ---
-  function initWebSocket() {
-    const wsBadge = document.getElementById("wsStatusBadge");
+  // --- WebSocket Connection for Real-Time Streaming ---
+  function initTerminalWebSocket() {
+    const termStatus = document.getElementById("termStatusBadge");
     const ws = new WebSocket(`${WS_BASE}/ws/activity`);
 
     ws.onopen = () => {
-      if (wsBadge) {
-        wsBadge.style.color = "var(--success)";
-        wsBadge.style.background = "var(--success-bg)";
-        wsBadge.style.borderColor = "var(--success-border)";
+      if (termStatus) {
+        termStatus.className = "terminal-status-badge";
+        termStatus.innerHTML = `<span style="display: inline-block; width: 6px; height: 6px; border-radius: 50%; background: var(--term-green);"></span> STREAM ACTIVE`;
       }
     };
 
     ws.onmessage = (event) => {
       try {
         const item = JSON.parse(event.data);
-        if (activityFeedList) {
-          const tempDiv = document.createElement("div");
-          tempDiv.innerHTML = renderFeedItem(item);
-          const firstChild = tempDiv.firstElementChild;
-          firstChild.style.boxShadow = "0 0 8px rgba(37, 99, 235, 0.25)";
-          
-          if (activityFeedList.children.length === 1 && activityFeedList.children[0].textContent.includes("No activities")) {
-            activityFeedList.innerHTML = "";
-          }
-          activityFeedList.prepend(firstChild);
-
-          while (activityFeedList.children.length > 50) {
-            activityFeedList.removeChild(activityFeedList.lastChild);
-          }
-        }
+        appendTerminalLog(item, false);
+        // Instant refresh table upon any new websocket event
         loadDashboardComplaints();
       } catch (e) {
         console.error("Error processing websocket activity:", e);
@@ -286,12 +340,11 @@ if (complaintsTableBody) {
     };
 
     ws.onclose = () => {
-      if (wsBadge) {
-        wsBadge.style.color = "var(--danger)";
-        wsBadge.style.background = "var(--danger-bg)";
-        wsBadge.style.borderColor = "var(--danger-border)";
+      if (termStatus) {
+        termStatus.className = "terminal-status-badge reconnecting";
+        termStatus.innerHTML = `<span style="display: inline-block; width: 6px; height: 6px; border-radius: 50%; background: #ef4444;"></span> RECONNECTING...`;
       }
-      setTimeout(initWebSocket, 3000);
+      setTimeout(initTerminalWebSocket, 3000);
     };
 
     ws.onerror = () => {
@@ -299,6 +352,7 @@ if (complaintsTableBody) {
     };
   }
 
+  // --- Action: Resolve Complaint ---
   window.resolveComplaint = async function (complaintId) {
     if (!confirm(`Mark Complaint #${complaintId} as resolved?`)) return;
 
@@ -313,13 +367,25 @@ if (complaintsTableBody) {
     }
   };
 
-  document.getElementById("refreshBtn")?.addEventListener("click", () => {
-    loadDashboardComplaints();
-    loadActivityFeed();
+  // Clear Terminal Button
+  document.getElementById("clearTerminalBtn")?.addEventListener("click", () => {
+    terminalBody.innerHTML = `<div class="term-empty">Terminal cleared. Waiting for new activity...</div>`;
   });
 
-  // Initial loads
+  // Manual Refresh & Filter events
+  document.getElementById("manualRefreshBtn")?.addEventListener("click", () => {
+    loadDashboardComplaints();
+  });
+  
+  showOnlyOpenCheckbox?.addEventListener("change", () => {
+    loadDashboardComplaints();
+  });
+
+  // 1. Initial Data & Feed Loads
   loadDashboardComplaints();
-  loadActivityFeed();
-  initWebSocket();
+  loadInitialTerminalLogs();
+  initTerminalWebSocket();
+
+  // 2. Set 5-second interval auto-refresh for complaints table
+  setInterval(loadDashboardComplaints, 5000);
 }

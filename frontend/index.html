@@ -27,82 +27,64 @@
 
   <!-- Hero -->
   <section class="hero">
-    <div class="badge">🤖 Powered by Autonomous AI Agents</div>
-    <h1>Autonomous Campus Grievance Resolution</h1>
-    <p>Submit your issue and let our intelligent agents classify, prioritize, route to the right department, and monitor SLA timelines instantly.</p>
+    <div class="badge">🤖 Autonomous AI Grievance Agent</div>
+    <h1>Instant College Grievance Resolution</h1>
+    <p>Describe your issue in plain text. Our AI agent categorizes, evaluates urgency, assigns the authority, and establishes SLA deadlines automatically.</p>
   </section>
 
   <!-- Main Content -->
   <main class="container">
     <div class="grid-2">
-      <!-- Submit Grievance Form -->
+      <!-- Submit Complaint Form -->
       <section class="card">
-        <h2 class="card-title">📝 Lodge a Grievance</h2>
-        <p class="card-subtitle">Provide details below. Our AI agent will triage and assign it in real-time.</p>
+        <h2 class="card-title">📝 Lodge a Complaint</h2>
+        <p class="card-subtitle">Submit your issue below for automatic triage & resolution tracking.</p>
 
-        <form id="grievanceForm">
+        <form id="complaintForm">
           <div class="form-group">
-            <label for="student_name">Full Name *</label>
-            <input type="text" id="student_name" class="form-control" placeholder="e.g. Alex Morgan" required>
+            <label for="complaintText">Complaint Description *</label>
+            <textarea id="complaintText" class="form-control" rows="5" placeholder="e.g. Water supply stopped in hostel block C since morning, urgent repair needed..." required></textarea>
           </div>
 
-          <div class="form-group">
-            <label for="student_email">College Email *</label>
-            <input type="email" id="student_email" class="form-control" placeholder="alex@campus.edu" required>
-          </div>
-
-          <div class="form-group">
-            <label for="student_id">Roll / Student ID (Optional)</label>
-            <input type="text" id="student_id" class="form-control" placeholder="e.g. CS-2024-042">
-          </div>
-
-          <div class="form-group">
-            <label for="title">Subject / Title *</label>
-            <input type="text" id="title" class="form-control" placeholder="e.g. Water shortage in Block B Hostel" required>
-          </div>
-
-          <div class="form-group">
-            <label for="description">Detailed Description *</label>
-            <textarea id="description" class="form-control" rows="4" placeholder="Describe the issue clearly, including location and impact..." required></textarea>
-          </div>
-
-          <button type="submit" id="submitBtn" class="btn btn-primary btn-full">Submit to AI Agent</button>
+          <button type="submit" id="submitBtn" class="btn btn-primary btn-full">Submit Complaint</button>
         </form>
 
         <!-- Result Box -->
         <div id="submissionResult" class="agent-result">
-          <h3 style="color: #34d399; margin-bottom: 0.5rem; font-size: 1.05rem;">✅ Ticket Successfully Generated!</h3>
-          <p><strong>Ticket ID:</strong> <span id="resTicketId" style="color:#a5b4fc; font-weight:700;"></span></p>
-          <p><strong>Detected Category:</strong> <span id="resCategory"></span></p>
-          <p><strong>Assigned Priority:</strong> <span id="resPriority"></span></p>
-          <p><strong>Routed To:</strong> <span id="resDepartment"></span></p>
-          <p><strong>AI Triage Summary:</strong> <span id="resSummary" style="color:var(--text-muted);"></span></p>
-          <p><strong>Resolution SLA Target:</strong> <span id="resSla"></span></p>
+          <h3 style="color: #34d399; margin-bottom: 0.5rem; font-size: 1.05rem;">✅ Complaint Registered!</h3>
+          <p><strong>Complaint ID:</strong> #<span id="resId" style="color:#a5b4fc; font-weight:700;"></span></p>
+          <p><strong>Category:</strong> <span id="resCategory"></span></p>
+          <p><strong>Urgency:</strong> <span id="resUrgency"></span></p>
+          <p><strong>Assigned Authority:</strong> <span id="resAuthority"></span></p>
+          <p><strong>Status:</strong> <span id="resStatus"></span></p>
+          <p><strong>SLA Deadline:</strong> <span id="resSla"></span></p>
         </div>
       </section>
 
-      <!-- Track Ticket Status -->
+      <!-- Track Complaint Status -->
       <section class="card">
-        <h2 class="card-title">🔍 Track Ticket Status</h2>
-        <p class="card-subtitle">Check real-time agent actions, SLA countdown, and resolution logs.</p>
+        <h2 class="card-title">🔍 Track Complaint</h2>
+        <p class="card-subtitle">Lookup status, escalation level, and timeline activity logs by ID.</p>
 
         <form id="trackForm">
           <div class="form-group">
-            <label for="trackTicketId">Ticket ID</label>
-            <input type="text" id="trackTicketId" class="form-control" placeholder="e.g. CR-A1B2C3D4" required>
+            <label for="trackId">Complaint ID</label>
+            <input type="number" id="trackId" class="form-control" placeholder="e.g. 1" required>
           </div>
-          <button type="submit" class="btn btn-primary btn-full">Check Status</button>
+          <button type="submit" class="btn btn-primary btn-full">Search Complaint</button>
         </form>
 
         <div id="trackResult" class="agent-result" style="margin-top: 1.5rem;">
           <h3 id="trackTitle" style="margin-bottom: 0.5rem;"></h3>
           <p><strong>Status:</strong> <span id="trackStatus"></span></p>
           <p><strong>Category:</strong> <span id="trackCategory"></span></p>
-          <p><strong>Priority:</strong> <span id="trackPriority"></span></p>
-          <p><strong>Department:</strong> <span id="trackDepartment"></span></p>
+          <p><strong>Urgency:</strong> <span id="trackUrgency"></span></p>
+          <p><strong>Assigned Authority:</strong> <span id="trackAuthority"></span></p>
+          <p><strong>Escalation Level:</strong> <span id="trackEscalation"></span></p>
           <p><strong>SLA Deadline:</strong> <span id="trackSla"></span></p>
+          <p><strong>Resolved At:</strong> <span id="trackResolvedAt"></span></p>
           
-          <h4 style="margin-top: 1rem; margin-bottom: 0.5rem; font-size: 0.95rem;">Audit & Agent History</h4>
+          <h4 style="margin-top: 1rem; margin-bottom: 0.5rem; font-size: 0.95rem;">Activity Log</h4>
           <ul id="trackLogs" style="padding-left: 1.25rem; font-size: 0.85rem; color: var(--text-muted);"></ul>
         </div>
       </section>

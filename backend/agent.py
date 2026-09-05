@@ -1,85 +1,81 @@
 """
 CampusResolve AI Agent Engine
-Handles autonomous grievance classification, severity analysis, department routing, and automated response drafting.
+Handles autonomous complaint classification, severity analysis, authority routing, and SLA determination.
 """
 
+import re
 from typing import Dict, Any
 from datetime import datetime, timedelta
-from backend.models import GrievanceCategory, PriorityLevel, GrievanceStatus
 
 
 class GrievanceAgent:
-    """Core Agent responsible for triaging and resolving campus grievances."""
+    """Core Agent responsible for triaging and resolving campus complaints."""
 
     CATEGORY_KEYWORDS = {
-        GrievanceCategory.HOSTEL: ["room", "hostel", "mess", "food", "warden", "water", "electricity", "dorm"],
-        GrievanceCategory.ACADEMIC: ["grade", "exam", "syllabus", "marks", "attendance", "course", "professor", "class"],
-        GrievanceCategory.MAINTENANCE: ["fan", "light", "ac", "broken", "leakage", "door", "bench", "lift", "elevator"],
-        GrievanceCategory.FINANCIAL: ["fee", "scholarship", "refund", "receipt", "fine", "dues", "payment"],
-        GrievanceCategory.HARASSMENT: ["ragging", "bully", "threat", "harass", "abuse", "safety", "discrimination"],
-        GrievanceCategory.TRANSPORT: ["bus", "shuttle", "parking", "driver", "route", "timing"],
+        "Academic": ["classroom", "class", "grade", "exam", "syllabus", "marks", "attendance", "course", "professor", "faculty", "lecture", "projector", "lab"],
+        "Hostel": ["hostel", "mess", "food", "warden", "water", "electricity", "dorm", "bed", "washroom", "room"],
+        "Maintenance": ["fan", "light", "ac", "broken", "leakage", "door", "bench", "lift", "elevator", "plumbing", "repairs"],
+        "Finance": ["fee", "scholarship", "refund", "receipt", "fine", "dues", "payment", "tuition"],
+        "Anti-Ragging/Safety": ["ragging", "bully", "threat", "harass", "abuse", "safety", "discrimination", "violence"],
+        "Transport": ["bus", "shuttle", "parking", "driver", "route", "timing"],
     }
 
-    DEPARTMENT_MAP = {
-        GrievanceCategory.HOSTEL: "Hostel Administration & Warden Office",
-        GrievanceCategory.ACADEMIC: "Academic Dean & Controller of Examinations",
-        GrievanceCategory.MAINTENANCE: "Campus Facilities & Estate Office",
-        GrievanceCategory.FINANCIAL: "Finance & Accounts Office",
-        GrievanceCategory.HARASSMENT: "Anti-Ragging & Internal Complaints Committee (ICC)",
-        GrievanceCategory.TRANSPORT: "Transport & Logistics Office",
-        GrievanceCategory.OTHER: "General Student Affairs Grievance Cell",
+    AUTHORITY_MAP = {
+        "Academic": "Academic Dean & Controller of Examinations",
+        "Hostel": "Hostel Administration & Warden Office",
+        "Maintenance": "Campus Facilities & Estate Office",
+        "Finance": "Finance & Accounts Office",
+        "Anti-Ragging/Safety": "Anti-Ragging & Internal Complaints Committee",
+        "Transport": "Transport & Logistics Office",
+        "General": "Student Affairs Grievance Cell",
     }
 
     SLA_HOURS = {
-        PriorityLevel.CRITICAL: 6,
-        PriorityLevel.HIGH: 24,
-        PriorityLevel.MEDIUM: 48,
-        PriorityLevel.LOW: 72,
+        "critical": 6,
+        "high": 24,
+        "medium": 48,
+        "low": 72,
     }
 
-    def analyze_grievance(self, title: str, description: str) -> Dict[str, Any]:
+    def analyze(self, text: str) -> Dict[str, Any]:
         """
-        Agentic analysis of student grievance.
-        In hackathon mode, uses heuristic fallback + LLM integration ready hooks.
+        Agentic analysis of student complaint text using regex word matching.
         """
-        combined_text = f"{title.lower()} {description.lower()}"
-        
-        # 1. Determine Category
-        detected_category = GrievanceCategory.OTHER
+        lower_text = text.lower()
+
+        # 1. Category Detection (word-boundary matched)
+        detected_category = "General"
         for cat, keywords in self.CATEGORY_KEYWORDS.items():
-            if any(kw in combined_text for kw in keywords):
+            pattern = r'\b(' + '|'.join(re.escape(kw) for kw in keywords) + r')\b'
+            if re.search(pattern, lower_text):
                 detected_category = cat
                 break
 
-        # 2. Determine Priority & Urgency
-        priority = PriorityLevel.MEDIUM
-        if detected_category == GrievanceCategory.HARASSMENT or any(w in combined_text for w in ["emergency", "urgent", "danger", "hazard", "threat"]):
-            priority = PriorityLevel.CRITICAL
-        elif any(w in combined_text for w in ["broken", "immediate", "failed", "severe", "refund"]):
-            priority = PriorityLevel.HIGH
-        elif any(w in combined_text for w in ["minor", "query", "suggestion", "feedback"]):
-            priority = PriorityLevel.LOW
+        # 2. Urgency Detection
+        urgency = "medium"
+        critical_pattern = r'\b(ragging|threat|emergency|urgent|danger|hazard|harass|abuse|immediate)\b'
+        high_pattern = r'\b(broken|failed|severe|refund|leakage|stopped|flickering)\b'
+        low_pattern = r'\b(minor|query|suggestion|feedback)\b'
 
-        # 3. Target Department
-        assigned_department = self.DEPARTMENT_MAP.get(detected_category, "General Student Affairs Grievance Cell")
+        if detected_category == "Anti-Ragging/Safety" or re.search(critical_pattern, lower_text):
+            urgency = "critical"
+        elif re.search(high_pattern, lower_text):
+            urgency = "high"
+        elif re.search(low_pattern, lower_text):
+            urgency = "low"
 
-        # 4. Calculate SLA Deadline
-        sla_hours = self.SLA_HOURS.get(priority, 48)
+        # 3. Assigned Authority
+        assigned_authority = self.AUTHORITY_MAP.get(detected_category, "Student Affairs Grievance Cell")
+
+        # 4. SLA Deadline
+        sla_hours = self.SLA_HOURS.get(urgency, 48)
         sla_deadline = datetime.utcnow() + timedelta(hours=sla_hours)
-
-        # 5. Suggested Action & AI Summary
-        ai_summary = f"Student reports issue concerning {detected_category.value.lower()}: '{title}'. Automated triage tagged priority as {priority.value}."
-        suggested_action = f"Forward to {assigned_department} with {sla_hours}h SLA resolution window. Auto-notify student on progress."
 
         return {
             "category": detected_category,
-            "priority": priority,
-            "assigned_department": assigned_department,
-            "sentiment_score": "NEGATIVE" if priority in [PriorityLevel.CRITICAL, PriorityLevel.HIGH] else "NEUTRAL",
-            "ai_summary": ai_summary,
-            "suggested_action": suggested_action,
+            "urgency": urgency,
+            "assigned_authority": assigned_authority,
             "sla_deadline": sla_deadline,
-            "initial_status": GrievanceStatus.ASSIGNED,
         }
 
 

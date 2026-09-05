@@ -8,7 +8,6 @@ load_dotenv()
 
 DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///./campus_resolve.db")
 
-# SQLite needs check_same_thread=False for multithreaded FastAPI requests
 connect_args = {"check_same_thread": False} if DATABASE_URL.startswith("sqlite") else {}
 
 engine = create_engine(DATABASE_URL, connect_args=connect_args)

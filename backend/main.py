@@ -35,6 +35,8 @@ app = FastAPI(
     lifespan=lifespan
 )
 
+from fastapi.staticfiles import StaticFiles
+
 # CORS configuration for frontend
 app.add_middleware(
     CORSMiddleware,
@@ -43,6 +45,10 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# Mount frontend directory for browser access
+app.mount("/app", StaticFiles(directory="frontend", html=True), name="frontend")
+
 
 # Initial Authority Mapping based on classified Category
 AUTHORITY_MAP = {

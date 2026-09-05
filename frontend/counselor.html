@@ -1,0 +1,113 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>CampusResolve — Protected Counselor Portal</title>
+  <link rel="stylesheet" href="style.css">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+</head>
+<body>
+
+  <!-- Header -->
+  <header>
+    <div class="nav-container">
+      <a href="index.html" class="brand">
+        <div class="brand-icon" style="background: #e11d48;">🛡️</div>
+        <div class="brand-title">Campus<span>Resolve</span> <span style="font-size: 0.8rem; font-weight: 500; color: #e11d48; margin-left: 0.25rem;">[Counseling Cell]</span></div>
+      </a>
+      <nav class="nav-links">
+        <a href="index.html" class="nav-link">Student Portal</a>
+        <a href="dashboard.html" class="nav-link">Admin Dashboard</a>
+        <a href="counselor.html" class="nav-link active" style="color: #e11d48;">🔒 Counselor Portal</a>
+      </nav>
+    </div>
+  </header>
+
+  <main class="container">
+    <!-- 1. Counselor Auth Gate Card (Visible before login) -->
+    <div id="counselorAuthGate" class="card" style="max-width: 440px; margin: 3rem auto; text-align: center;">
+      <div style="font-size: 2.5rem; margin-bottom: 0.5rem;">🔒</div>
+      <h2 style="font-size: 1.35rem; font-weight: 700; color: var(--text-main); margin-bottom: 0.4rem;">Counselor Access Only</h2>
+      <p style="color: var(--text-muted); font-size: 0.875rem; margin-bottom: 1.5rem;">
+        This portal contains sensitive harassment & student safety disclosures. Please enter the Counselor access key to proceed.
+      </p>
+
+      <form id="counselorLoginForm">
+        <div class="form-group" style="text-align: left;">
+          <label for="counselorPin">Counselor Passcode</label>
+          <input 
+            type="password" 
+            id="counselorPin" 
+            class="form-control" 
+            placeholder="Enter passcode (demo: counselor2026)" 
+            required>
+        </div>
+        <button type="submit" class="btn btn-primary btn-full" style="background: #e11d48;">
+          Unlock Protected Records
+        </button>
+      </form>
+      <div style="margin-top: 1rem; font-size: 0.775rem; color: var(--text-muted);">
+        Demo Passcode: <code>counselor2026</code>
+      </div>
+    </div>
+
+    <!-- 2. Protected Counseling Dashboard (Visible after login) -->
+    <div id="counselorProtectedView" style="display: none;">
+      <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1.5rem; flex-wrap: wrap; gap: 0.75rem;">
+        <div>
+          <div class="badge" style="background: #fef2f2; color: #e11d48; border: 1px solid #fecaca; margin-bottom: 0.4rem;">
+            🔒 Confidential Safety Records
+          </div>
+          <h1 style="font-size: 1.6rem; font-weight: 700; color: var(--text-main);">Counseling & Anti-Harassment Registry</h1>
+          <p style="color: var(--text-muted); font-size: 0.875rem;">
+            Isolated queue for sensitive grievance cases. These records are immune from automated bot escalation and excluded from public dashboards.
+          </p>
+        </div>
+        <div style="display: flex; gap: 0.5rem;">
+          <button id="counselorRefreshBtn" class="btn btn-outline btn-sm">🔄 Refresh</button>
+          <button id="counselorLogoutBtn" class="btn btn-sm" style="background: #f1f5f9; color: var(--text-muted);">Logout</button>
+        </div>
+      </div>
+
+      <!-- Confidential Table -->
+      <section class="card" style="padding: 1.5rem; border-top: 3px solid #e11d48;">
+        <div class="card-header">
+          <h2 class="card-title" style="color: #e11d48;">Sensitive Cases Requiring Counselor Action</h2>
+          <span id="counselorCountBadge" class="badge badge-high">0 Cases</span>
+        </div>
+
+        <div class="table-container">
+          <table>
+            <thead>
+              <tr>
+                <th style="width: 70px;">Case #</th>
+                <th>Confidential Disclosure Text</th>
+                <th>Priority</th>
+                <th>Assigned Authority</th>
+                <th>Auto-Escalation</th>
+                <th>Status</th>
+                <th>Reported On</th>
+                <th style="text-align: right;">Action</th>
+              </tr>
+            </thead>
+            <tbody id="counselorTableBody">
+              <tr>
+                <td colspan="8" style="text-align: center; color: var(--text-muted); padding: 2rem;">Loading confidential records...</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+    </div>
+  </main>
+
+  <footer>
+    CampusResolve &copy; 2026 — Protected Institutional Counseling Registry
+  </footer>
+
+  <script src="app.js"></script>
+</body>
+</html>

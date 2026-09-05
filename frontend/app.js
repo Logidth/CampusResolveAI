@@ -172,14 +172,9 @@ const showOnlyOpenCheckbox = document.getElementById("showOnlyOpen");
 
 if (complaintsTableBody && terminalBody) {
 
-  // --- Render Terminal Log Line with Action Color Coding ---
   function createTerminalLogElement(item) {
     const actionStr = (item.action || "").toUpperCase();
     
-    // Color coding:
-    // Green for "classified" / "classification"
-    // Yellow for "escalated" / "escalation"
-    // Blue for "resolved" / "resolution"
     let tagClass = "term-tag-classified";
     let tagLabel = "CLASSIFIED";
 
@@ -214,7 +209,6 @@ if (complaintsTableBody && terminalBody) {
     return div;
   }
 
-  // --- Append Log to Terminal (Maintains Autoscroll) ---
   function appendTerminalLog(item, isPrepend = false) {
     if (terminalBody.children.length === 1 && terminalBody.children[0].classList.contains("term-empty")) {
       terminalBody.innerHTML = "";
@@ -228,13 +222,11 @@ if (complaintsTableBody && terminalBody) {
       terminalBody.scrollTop = terminalBody.scrollHeight;
     }
 
-    // Retain maximum 100 log lines in terminal buffer
     while (terminalBody.children.length > 100) {
       terminalBody.removeChild(terminalBody.firstChild);
     }
   }
 
-  // --- Fetch Initial 50 Terminal Logs via GET /activity-feed ---
   async function loadInitialTerminalLogs() {
     try {
       const res = await fetch(`${API_BASE}/activity-feed`);
@@ -247,7 +239,6 @@ if (complaintsTableBody && terminalBody) {
       }
 
       terminalBody.innerHTML = "";
-      // Render oldest to newest so newest is at the bottom of the terminal window
       const chronological = feed.slice().reverse();
       chronological.forEach((item) => {
         appendTerminalLog(item, false);
@@ -257,14 +248,14 @@ if (complaintsTableBody && terminalBody) {
     }
   }
 
-  // --- Load Open Complaints Table (Auto-refreshing every 5s) ---
+  // Auto-refreshes every 5 seconds (Excludes confidential harassment records from general view)
   async function loadDashboardComplaints() {
     try {
+      // GET /complaints excludes harassment by default for privacy
       const res = await fetch(`${API_BASE}/complaints`);
       if (!res.ok) throw new Error("Unable to fetch complaints");
       const list = await res.json();
 
-      // Stats
       const total = list.length;
       const openList = list.filter((c) => c.status === "open");
       const openCount = openList.length;
@@ -276,12 +267,11 @@ if (complaintsTableBody && terminalBody) {
       document.getElementById("statEscalated").innerText = escalatedCount;
       document.getElementById("statResolved").innerText = resolvedCount;
 
-      // Filter by open complaints if checkbox is checked
       const showOnlyOpen = showOnlyOpenCheckbox ? showOnlyOpenCheckbox.checked : true;
       const displayList = showOnlyOpen ? openList : list;
 
       if (displayList.length === 0) {
-        const msg = showOnlyOpen ? "No active open complaints in queue." : "No complaints recorded in database.";
+        const msg = showOnlyOpen ? "No active open complaints in general queue." : "No general complaints recorded.";
         complaintsTableBody.innerHTML = `<tr><td colspan="9" style="text-align: center; color: var(--text-muted); padding: 2rem;">${msg}</td></tr>`;
         return;
       }
@@ -316,7 +306,6 @@ if (complaintsTableBody && terminalBody) {
     }
   }
 
-  // --- WebSocket Connection for Real-Time Streaming ---
   function initTerminalWebSocket() {
     const termStatus = document.getElementById("termStatusBadge");
     const ws = new WebSocket(`${WS_BASE}/ws/activity`);
@@ -332,7 +321,6 @@ if (complaintsTableBody && terminalBody) {
       try {
         const item = JSON.parse(event.data);
         appendTerminalLog(item, false);
-        // Instant refresh table upon any new websocket event
         loadDashboardComplaints();
       } catch (e) {
         console.error("Error processing websocket activity:", e);
@@ -352,7 +340,6 @@ if (complaintsTableBody && terminalBody) {
     };
   }
 
-  // --- Action: Resolve Complaint ---
   window.resolveComplaint = async function (complaintId) {
     if (!confirm(`Mark Complaint #${complaintId} as resolved?`)) return;
 
@@ -367,12 +354,10 @@ if (complaintsTableBody && terminalBody) {
     }
   };
 
-  // Clear Terminal Button
   document.getElementById("clearTerminalBtn")?.addEventListener("click", () => {
     terminalBody.innerHTML = `<div class="term-empty">Terminal cleared. Waiting for new activity...</div>`;
   });
 
-  // Manual Refresh & Filter events
   document.getElementById("manualRefreshBtn")?.addEventListener("click", () => {
     loadDashboardComplaints();
   });
@@ -381,11 +366,113 @@ if (complaintsTableBody && terminalBody) {
     loadDashboardComplaints();
   });
 
-  // 1. Initial Data & Feed Loads
   loadDashboardComplaints();
   loadInitialTerminalLogs();
   initTerminalWebSocket();
-
-  // 2. Set 5-second interval auto-refresh for complaints table
   setInterval(loadDashboardComplaints, 5000);
+}
+
+// ==========================================
+// 3. PROTECTED COUNSELOR PORTAL (counselor.html)
+// ==========================================
+
+const counselorLoginForm = document.getElementById("counselorLoginForm");
+const counselorAuthGate = document.getElementById("counselorAuthGate");
+const counselorProtectedView = document.getElementById("counselorProtectedView");
+const counselorTableBody = document.getElementById("counselorTableBody");
+const counselorCountBadge = document.getElementById("counselorCountBadge");
+
+if (counselorLoginForm) {
+  const COUNSELOR_PASSCODE = "counselor2026";
+
+  // Check existing session
+  if (sessionStorage.getItem("counselor_authenticated") === "true") {
+    showCounselorDashboard();
+  }
+
+  counselorLoginForm.addEventListener("submit", (e) => {
+    e.preventDefault();
+    const pin = document.getElementById("counselorPin").value.trim();
+    if (pin === COUNSELOR_PASSCODE) {
+      sessionStorage.setItem("counselor_authenticated", "true");
+      showCounselorDashboard();
+    } else {
+      alert("Incorrect Counselor Passcode. (Demo passcode: counselor2026)");
+    }
+  });
+
+  document.getElementById("counselorLogoutBtn")?.addEventListener("click", () => {
+    sessionStorage.removeItem("counselor_authenticated");
+    counselorProtectedView.style.display = "none";
+    counselorAuthGate.style.display = "block";
+    document.getElementById("counselorPin").value = "";
+  });
+
+  document.getElementById("counselorRefreshBtn")?.addEventListener("click", () => {
+    loadCounselorComplaints();
+  });
+
+  function showCounselorDashboard() {
+    counselorAuthGate.style.display = "none";
+    counselorProtectedView.style.display = "block";
+    loadCounselorComplaints();
+  }
+
+  async function loadCounselorComplaints() {
+    try {
+      const res = await fetch(`${API_BASE}/counselor/complaints`);
+      if (!res.ok) throw new Error("Failed to load counseling records");
+      const list = await res.json();
+
+      if (counselorCountBadge) {
+        counselorCountBadge.innerText = `${list.length} Confidential Case${list.length === 1 ? '' : 's'}`;
+      }
+
+      if (list.length === 0) {
+        counselorTableBody.innerHTML = `<tr><td colspan="8" style="text-align: center; color: var(--text-muted); padding: 2rem;">No harassment or safety records filed.</td></tr>`;
+        return;
+      }
+
+      counselorTableBody.innerHTML = list
+        .map(
+          (c) => `
+        <tr>
+          <td><strong style="color: #e11d48;">#CASE-${c.id}</strong></td>
+          <td style="max-width: 300px; word-break: break-word; font-weight: 500;">
+            ${c.text}
+          </td>
+          <td>${getUrgencyBadge(c.urgency)}</td>
+          <td><span style="font-weight: 600; color: #e11d48;">${c.assigned_authority}</span></td>
+          <td><span class="badge" style="background: #ecfdf5; color: #047857; border: 1px solid #a7f3d0;">🛡️ Locked (No Auto-Escalation)</span></td>
+          <td>${getStatusBadge(c.status)}</td>
+          <td><span style="font-size: 0.8rem; color: var(--text-muted);">${formatDate(c.created_at)}</span></td>
+          <td style="text-align: right;">
+            ${
+              c.status !== "resolved"
+                ? `<button onclick="resolveCounselorCase(${c.id})" class="btn btn-sm" style="background: #e11d48; color: #fff;">Resolve Case</button>`
+                : `<span style="color: var(--success); font-weight: 600; font-size: 0.8rem;">✓ Closed</span>`
+            }
+          </td>
+        </tr>
+      `
+        )
+        .join("");
+    } catch (err) {
+      counselorTableBody.innerHTML = `<tr><td colspan="8" style="text-align: center; color: var(--danger); padding: 2rem;">Error: ${err.message}</td></tr>`;
+    }
+  }
+
+  window.resolveCounselorCase = async function (caseId) {
+    if (!confirm(`Mark Confidential Case #CASE-${caseId} as resolved by Counseling Cell?`)) return;
+
+    try {
+      const res = await fetch(`${API_BASE}/complaints/${caseId}/resolve`, {
+        method: "PATCH",
+      });
+      if (!res.ok) throw new Error("Failed to resolve case");
+      loadCounselorComplaints();
+    } catch (err) {
+      alert("Error: " + err.message);
+    }
+  };
 }

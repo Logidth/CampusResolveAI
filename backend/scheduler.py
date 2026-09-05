@@ -1,6 +1,7 @@
 """
 CampusResolve Escalation & SLA Scheduler
 Periodically checks for overdue complaints and triggers automated agent escalations.
+Excludes complaints flagged with no_auto_escalation (e.g. harassment complaints).
 """
 
 from datetime import datetime
@@ -24,6 +25,8 @@ def check_and_escalate_grievances(db: Session = None):
         now = datetime.utcnow()
         overdue_complaints = db.query(Complaint).filter(
             Complaint.status == "open",
+            Complaint.no_auto_escalation == False,
+            Complaint.category != "harassment",
             Complaint.sla_deadline.isnot(None),
             Complaint.sla_deadline < now
         ).all()

@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import List, Optional
 from fastapi import FastAPI, Depends, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
@@ -7,7 +7,7 @@ from sqlalchemy.orm import Session
 
 from backend.database import engine, Base, get_db
 from backend.models import Complaint, ActivityLog
-from backend.agent import agent
+from backend.agent import classify_complaint
 
 # Initialize SQLite database tables
 Base.metadata.create_all(bind=engine)
@@ -26,6 +26,21 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# Authority and SLA mappings requested
+AUTHORITY_MAP = {
+    "hostel": "Warden",
+    "mess": "Mess Committee",
+    "academic": "HOD",
+    "infrastructure": "Estate Office",
+    "harassment": "Counseling Cell",
+}
+
+SLA_HOURS = {
+    "high": 6,
+    "medium": 48,
+    "low": 168,
+}
 
 
 # --- Pydantic Schemas ---
@@ -53,6 +68,7 @@ class ComplaintOut(BaseModel):
     status: str
     assigned_authority: Optional[str] = None
     escalation_level: int
+    no_auto_escalation: bool = False
     created_at: datetime
     sla_deadline: Optional[datetime] = None
     resolved_at: Optional[datetime] = None
@@ -75,32 +91,58 @@ def health_check():
 
 @app.post("/complaints", response_model=ComplaintOut, status_code=201)
 def create_complaint(payload: ComplaintCreate, db: Session = Depends(get_db)):
-    """Create a new complaint with text and trigger automated agent analysis."""
-    # Analyze text using agent triage
-    analysis = agent.analyze(payload.text)
+    """
+    Create a new complaint, call LLM classification, route to appropriate authority,
+    set SLA deadline, enforce harassment safety flags, and log the activity.
+    """
+    created_at = datetime.utcnow()
 
+    # 1. Call AI Classifier (Groq / Mock fallback)
+    classification = classify_complaint(payload.text)
+    category = classification.get("category", "infrastructure").lower()
+    urgency = classification.get("urgency", "medium").lower()
+    reasoning = classification.get("reasoning", "")
+
+    # 2. Determine Assigned Authority
+    assigned_authority = AUTHORITY_MAP.get(category, "Estate Office")
+
+    # 3. Apply Special Harassment Rule
+    no_auto_escalation = False
+    if category == "harassment":
+        urgency = "high"
+        assigned_authority = "Counseling Cell"
+        no_auto_escalation = True
+
+    # 4. Calculate SLA Deadline from created_at + timedelta
+    sla_hours = SLA_HOURS.get(urgency, 48)
+    sla_deadline = created_at + timedelta(hours=sla_hours)
+
+    # 5. Create Complaint Record
     complaint = Complaint(
         text=payload.text,
-        category=analysis["category"],
-        urgency=analysis["urgency"],
+        category=category,
+        urgency=urgency,
         status="open",
-        assigned_authority=analysis["assigned_authority"],
+        assigned_authority=assigned_authority,
         escalation_level=0,
-        created_at=datetime.utcnow(),
-        sla_deadline=analysis["sla_deadline"],
+        no_auto_escalation=no_auto_escalation,
+        created_at=created_at,
+        sla_deadline=sla_deadline,
         resolved_at=None,
     )
     db.add(complaint)
     db.flush()
 
-    # Log initial creation in activity_log
-    log_entry = ActivityLog(
+    # 6. Log Activity Entry
+    log_details = f"Classified as {category}/{urgency}, routed to {assigned_authority}. Reasoning: {reasoning}" if reasoning else f"Classified as {category}/{urgency}, routed to {assigned_authority}"
+    
+    activity_entry = ActivityLog(
         complaint_id=complaint.id,
-        action="CREATED",
-        details=f"Complaint lodged. Triaged to category '{analysis['category']}' with urgency '{analysis['urgency']}' and assigned to '{analysis['assigned_authority']}'.",
+        action="CLASSIFICATION",
+        details=log_details,
         timestamp=datetime.utcnow(),
     )
-    db.add(log_entry)
+    db.add(activity_entry)
     db.commit()
     db.refresh(complaint)
 

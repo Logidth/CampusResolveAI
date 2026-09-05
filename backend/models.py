@@ -1,5 +1,5 @@
 from datetime import datetime
-from sqlalchemy import Column, Integer, String, Text, DateTime, ForeignKey
+from sqlalchemy import Column, Integer, String, Text, DateTime, ForeignKey, Boolean
 from sqlalchemy.orm import relationship
 from backend.database import Base
 
@@ -14,6 +14,7 @@ class Complaint(Base):
     status = Column(String(50), default="open", nullable=False)
     assigned_authority = Column(String(150), nullable=True)
     escalation_level = Column(Integer, default=0, nullable=False)
+    no_auto_escalation = Column(Boolean, default=False, nullable=False)
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
     sla_deadline = Column(DateTime, nullable=True)
     resolved_at = Column(DateTime, nullable=True)

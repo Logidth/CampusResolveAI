@@ -61,6 +61,16 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# Prevent stale browser caching of frontend static assets
+@app.middleware("http")
+async def add_cache_control_headers(request, call_next):
+    response = await call_next(request)
+    if request.url.path.startswith("/app"):
+        response.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
+        response.headers["Pragma"] = "no-cache"
+        response.headers["Expires"] = "0"
+    return response
+
 # Mount frontend directory for browser access
 app.mount("/app", StaticFiles(directory="frontend", html=True), name="frontend")
 

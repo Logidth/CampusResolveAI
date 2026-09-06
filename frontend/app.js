@@ -1,27 +1,46 @@
-// Dynamically detect API and WebSocket endpoints for production and local environments
-const getApiBase = () => {
+// Dynamically detect API and WebSocket endpoints for production, local, and custom deployments
+function getApiBase() {
   if (typeof window !== "undefined" && window.location) {
-    if (window.location.protocol === "file:" || ["5500", "3000", "5173"].includes(window.location.port)) {
+    // 1. URL Query Parameter override: ?api=https://my-backend.onrender.com
+    try {
+      const urlParams = new URLSearchParams(window.location.search);
+      const apiParam = urlParams.get("api") || urlParams.get("backend");
+      if (apiParam) {
+        const cleanApi = apiParam.replace(/\/+$/, "");
+        localStorage.setItem("cr_api_base", cleanApi);
+        return cleanApi;
+      }
+    } catch (e) {}
+
+    // 2. LocalStorage override
+    const storedApi = localStorage.getItem("cr_api_base");
+    if (storedApi) {
+      return storedApi;
+    }
+
+    // 3. If opened via file:// or separate dev servers (Live Server 5500, Vite 5173, etc.)
+    if (window.location.protocol === "file:" || ["5500", "3000", "5173", "8080"].includes(window.location.port)) {
       return "http://127.0.0.1:8000";
     }
+
+    // 4. Default: Current origin (production deployment or FastAPI on port 8000)
     return window.location.origin;
   }
   return "http://127.0.0.1:8000";
-};
+}
 
-const getWsBase = () => {
-  if (typeof window !== "undefined" && window.location) {
-    if (window.location.protocol === "file:" || ["5500", "3000", "5173"].includes(window.location.port)) {
-      return "ws://127.0.0.1:8000";
-    }
-    const wsProto = window.location.protocol === "https:" ? "wss:" : "ws:";
-    return `${wsProto}//${window.location.host}`;
+function getWsBase(apiBase) {
+  try {
+    const url = new URL(apiBase);
+    const wsProto = url.protocol === "https:" ? "wss:" : "ws:";
+    return `${wsProto}//${url.host}`;
+  } catch (e) {
+    return "ws://127.0.0.1:8000";
   }
-  return "ws://127.0.0.1:8000";
-};
+}
 
 const API_BASE = getApiBase();
-const WS_BASE = getWsBase();
+const WS_BASE = getWsBase(API_BASE);
 
 // ==========================================
 // 0. AUTHENTICATION & SESSION MANAGEMENT
@@ -346,7 +365,44 @@ if (authLoggedOutView && authLoggedInView) {
         `;
       }).join("");
     } catch (e) {
-      quickAccountsList.innerHTML = `<div style="color: var(--danger); font-size: 0.8rem; padding: 1rem;">Unable to load demo directory.</div>`;
+      console.warn("Backend connectivity issue:", e);
+      const fallbackAccounts = [
+        { username: "warden", password: "warden123", role: "Warden", full_name: "Prof. R. K. Sharma (Warden)", email: "dlogidth4@gmail.com" },
+        { username: "mess", password: "mess123", role: "Mess Committee", full_name: "Dr. Ananya Gupta (Mess Committee)", email: "dlogidth5@gmail.com" },
+        { username: "hod", password: "hod123", role: "HOD", full_name: "Dr. Vikram Malhotra (HOD)", email: "717824v101@kce.ac.in" },
+        { username: "estate", password: "estate123", role: "Estate Office", full_name: "Er. S. N. Roy (Estate Office)", email: "717824v134@kce.ac.in" },
+        { username: "counselor", password: "counselor123", role: "Counseling Cell", full_name: "Dr. Sunita Rao (Chief Counselor)", email: "717824v152@kce.ac.in" },
+        { username: "principal", password: "principal123", role: "Principal", full_name: "Dr. K. S. Pillai (Principal / Director)", email: "717824v27@kce.ac.in" },
+        { username: "admin", password: "admin123", role: "Admin", full_name: "Central Institutional Administrator", email: "717824v134@kce.ac.in" }
+      ];
+
+      quickAccountsList.innerHTML = `
+        <div style="background: rgba(239, 68, 68, 0.1); border: 1px solid rgba(239, 68, 68, 0.3); border-radius: 8px; padding: 0.75rem; margin-bottom: 0.75rem; font-size: 0.8rem; color: var(--danger);">
+          ⚠️ <strong>Backend Unreachable</strong> at <code>${API_BASE}</code>.<br>
+          <span style="color: var(--text-muted); font-size: 0.75rem;">
+            If running locally: start backend with <code>uvicorn backend.main:app --port 8000</code>.<br>
+            If using deployed backend: append <code>?api=https://your-service.onrender.com</code> to URL.
+          </span>
+        </div>
+      ` + fallbackAccounts.map(acc => {
+        const icon = roleIcons[acc.role] || "👤";
+        return `
+          <div class="quick-acc-card" onclick="quickLogin('${acc.username}', '${acc.password}')">
+            <div>
+              <div class="quick-acc-role">
+                <span>${icon}</span>
+                <span>${acc.full_name || acc.role}</span>
+              </div>
+              <div class="quick-acc-meta">
+                ${acc.role} &middot; <span style="color: var(--primary); font-family: var(--font-mono); font-weight: 600;">${acc.email}</span>
+              </div>
+            </div>
+            <span class="quick-acc-badge">
+              ${acc.username}
+            </span>
+          </div>
+        `;
+      }).join("");
     }
 
     // Quick Login Helper

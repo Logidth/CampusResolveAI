@@ -1,5 +1,27 @@
-const API_BASE = "http://127.0.0.1:8000";
-const WS_BASE = "ws://127.0.0.1:8000";
+// Dynamically detect API and WebSocket endpoints for production and local environments
+const getApiBase = () => {
+  if (typeof window !== "undefined" && window.location) {
+    if (window.location.protocol === "file:" || ["5500", "3000", "5173"].includes(window.location.port)) {
+      return "http://127.0.0.1:8000";
+    }
+    return window.location.origin;
+  }
+  return "http://127.0.0.1:8000";
+};
+
+const getWsBase = () => {
+  if (typeof window !== "undefined" && window.location) {
+    if (window.location.protocol === "file:" || ["5500", "3000", "5173"].includes(window.location.port)) {
+      return "ws://127.0.0.1:8000";
+    }
+    const wsProto = window.location.protocol === "https:" ? "wss:" : "ws:";
+    return `${wsProto}//${window.location.host}`;
+  }
+  return "ws://127.0.0.1:8000";
+};
+
+const API_BASE = getApiBase();
+const WS_BASE = getWsBase();
 
 // ==========================================
 // 0. AUTHENTICATION & SESSION MANAGEMENT

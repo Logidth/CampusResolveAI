@@ -87,33 +87,57 @@ def get_authority_email(authority_name: str) -> str:
     return f"{authority_name.lower().replace(' ', '.')}@campus.edu"
 
 
-def _dispatch_smtp(recipient_email: str, subject: str, plain_body: str, html_body: str):
-    """Helper to dispatch real SMTP emails if SMTP server credentials are provided in .env."""
-    smtp_host = os.getenv("SMTP_HOST")
+def _dispatch_smtp(recipient_email: str, subject: str, plain_body: str, html_body: str) -> bool:
+    """Helper to dispatch real SMTP emails with STARTTLS (port 587) and SSL (port 465) fallback."""
+    smtp_host = os.getenv("SMTP_HOST", "smtp.gmail.com")
     smtp_port = int(os.getenv("SMTP_PORT", "587"))
     smtp_user = os.getenv("SMTP_USER")
     smtp_pass = os.getenv("SMTP_PASSWORD")
-    smtp_from = os.getenv("SMTP_FROM_EMAIL", smtp_user or "alerts@campusresolve.edu")
+    smtp_from = os.getenv("SMTP_FROM_EMAIL") or os.getenv("SMTP_FROM") or smtp_user or "alerts@campusresolve.edu"
 
-    if smtp_host and smtp_user and smtp_pass:
-        try:
-            msg = MIMEMultipart("alternative")
-            msg["From"] = smtp_from
-            msg["To"] = recipient_email
-            msg["Subject"] = subject
-            
-            part1 = MIMEText(plain_body, "plain")
-            part2 = MIMEText(html_body, "html")
-            msg.attach(part1)
-            msg.attach(part2)
+    if not smtp_user or not smtp_pass:
+        logger.warning(
+            f"[SMTP WARNING] Real email to {recipient_email} skipped: "
+            f"SMTP_USER or SMTP_PASSWORD is not set in environment variables."
+        )
+        return False
 
-            with smtplib.SMTP(smtp_host, smtp_port, timeout=5) as server:
+    msg = MIMEMultipart("alternative")
+    msg["From"] = smtp_from
+    msg["To"] = recipient_email
+    msg["Subject"] = subject
+    
+    part1 = MIMEText(plain_body, "plain")
+    part2 = MIMEText(html_body, "html")
+    msg.attach(part1)
+    msg.attach(part2)
+
+    # Attempt 1: Configured port (usually 587 with STARTTLS)
+    try:
+        if smtp_port == 465:
+            with smtplib.SMTP_SSL(smtp_host, smtp_port, timeout=15) as server:
+                server.login(smtp_user, smtp_pass)
+                server.send_message(msg)
+        else:
+            with smtplib.SMTP(smtp_host, smtp_port, timeout=15) as server:
                 server.starttls()
                 server.login(smtp_user, smtp_pass)
                 server.send_message(msg)
-            logger.info(f"[SMTP] Real email successfully delivered to {recipient_email}")
-        except Exception as e:
-            logger.warning(f"[SMTP] Could not send via real SMTP ({e}); simulated email retained in system.")
+        logger.info(f"[SMTP SUCCESS] Real email delivered to {recipient_email} via port {smtp_port}")
+        return True
+    except Exception as e1:
+        logger.warning(f"[SMTP RETRY] Port {smtp_port} attempt failed ({e1}). Attempting SSL port 465 fallback...")
+
+    # Attempt 2: Fallback to SSL on port 465 (handles networks blocking STARTTLS)
+    try:
+        with smtplib.SMTP_SSL(smtp_host, 465, timeout=15) as server:
+            server.login(smtp_user, smtp_pass)
+            server.send_message(msg)
+        logger.info(f"[SMTP SUCCESS] Real email delivered to {recipient_email} via port 465 fallback")
+        return True
+    except Exception as e2:
+        logger.error(f"[SMTP ERROR] Failed to deliver real email to {recipient_email}: {e2}")
+        return False
 
 
 def send_new_complaint_email(

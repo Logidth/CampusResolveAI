@@ -19,10 +19,10 @@ print('[START] STARTING CAMPUSRESOLVE END-TO-END TEST SUITE')
 print('=' * 65)
 
 # --- 1. HEALTH CHECK ---
-r_health = client.get('/')
+r_health = client.get('/health')
 assert r_health.status_code == 200
 assert r_health.json() == {'status': 'CampusResolve agent running'}
-print('[PASS] [1/6] Health Check GET /: OK ->', r_health.json())
+print('[PASS] [1/6] Health Check GET /health: OK ->', r_health.json())
 
 # --- 2. TEST ALL CATEGORIES, ROUTING & SLAs ---
 test_cases = [

@@ -2,7 +2,7 @@ import asyncio
 from datetime import datetime
 from typing import List, Optional, Dict, Any
 from contextlib import asynccontextmanager
-from fastapi import FastAPI, Depends, HTTPException, Query, WebSocket, WebSocketDisconnect, Header
+from fastapi import FastAPI, Depends, HTTPException, Query, WebSocket, WebSocketDisconnect, Header, BackgroundTasks
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
@@ -242,7 +242,7 @@ def list_authorities():
 
 
 @app.post("/complaints", response_model=ComplaintOut, status_code=201)
-def create_complaint(payload: ComplaintCreate, db: Session = Depends(get_db)):
+def create_complaint(payload: ComplaintCreate, background_tasks: BackgroundTasks, db: Session = Depends(get_db)):
     """
     Create a new complaint, execute AI classification, route to appropriate authority,
     calculate SLA deadline, enforce harassment safety flags, log activity, and broadcast event.
@@ -284,9 +284,28 @@ def create_complaint(payload: ComplaintCreate, db: Session = Depends(get_db)):
     db.add(complaint)
     db.flush()
 
-    # 5. Dispatch Automated Notification Email to Assigned Authority
+    # 5. Log Activity Entry
     assigned_email = get_authority_email(assigned_authority)
-    send_new_complaint_email(
+    log_details = f"Classified as {category}/{urgency}, routed to {assigned_authority}. Alert email dispatched to {assigned_email}."
+    if reasoning:
+        log_details += f" Reasoning: {reasoning}"
+
+    activity_entry = ActivityLog(
+        complaint_id=complaint.id,
+        action="CLASSIFICATION",
+        details=log_details,
+        timestamp=datetime.utcnow(),
+    )
+    db.add(activity_entry)
+
+    # 6. Commit immediately so data is saved without waiting on external networks
+    db.commit()
+    db.refresh(complaint)
+    db.refresh(activity_entry)
+
+    # 7. Asynchronously Dispatch Notification Email via BackgroundTasks
+    background_tasks.add_task(
+        send_new_complaint_email,
         complaint_id=complaint.id,
         complaint_text=complaint.text,
         category=complaint.category,
@@ -295,23 +314,7 @@ def create_complaint(payload: ComplaintCreate, db: Session = Depends(get_db)):
         sla_deadline=complaint.sla_deadline
     )
 
-    # 6. Log Activity Entry
-    log_details = f"Classified as {category}/{urgency}, routed to {assigned_authority}. Alert email dispatched to {assigned_email}."
-    if reasoning:
-        log_details += f" Reasoning: {reasoning}"
-    
-    activity_entry = ActivityLog(
-        complaint_id=complaint.id,
-        action="CLASSIFICATION",
-        details=log_details,
-        timestamp=datetime.utcnow(),
-    )
-    db.add(activity_entry)
-    db.commit()
-    db.refresh(complaint)
-    db.refresh(activity_entry)
-
-    # 6. Real-Time WebSocket Broadcast
+    # 8. Real-Time WebSocket Broadcast
     if category == "harassment":
         display_text = "[CONFIDENTIAL - ROUTED TO COUNSELING CELL]"
     else:

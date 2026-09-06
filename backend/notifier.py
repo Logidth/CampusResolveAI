@@ -91,8 +91,8 @@ def _dispatch_smtp(recipient_email: str, subject: str, plain_body: str, html_bod
     """Helper to dispatch real SMTP emails with STARTTLS (port 587) and SSL (port 465) fallback."""
     smtp_host = os.getenv("SMTP_HOST", "smtp.gmail.com")
     smtp_port = int(os.getenv("SMTP_PORT", "587"))
-    smtp_user = os.getenv("SMTP_USER")
-    smtp_pass = os.getenv("SMTP_PASSWORD")
+    smtp_user = os.getenv("SMTP_USER") or os.getenv("SMTP_USERNAME") or "dlogidth4@gmail.com"
+    smtp_pass = os.getenv("SMTP_PASSWORD") or "nmfvdqbdaywmkmyb"
     smtp_from = os.getenv("SMTP_FROM_EMAIL") or os.getenv("SMTP_FROM") or smtp_user or "alerts@campusresolve.edu"
 
     if not smtp_user or not smtp_pass:

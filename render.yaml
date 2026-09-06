@@ -18,8 +18,8 @@ services:
       - key: SMTP_PORT
         value: "587"
       - key: SMTP_USER
-        sync: false
+        value: dlogidth4@gmail.com
       - key: SMTP_PASSWORD
-        sync: false
-      - key: SMTP_FROM
-        sync: false
+        value: nmfvdqbdaywmkmyb
+      - key: SMTP_FROM_EMAIL
+        value: dlogidth4@gmail.com

@@ -113,7 +113,10 @@
             Logged in as <strong id="studentDisplayName">Student</strong> (<span class="student-badge-kce" id="studentDisplayEmail">717824v101@kce.ac.in</span>)
           </p>
         </div>
-        <div style="display: flex; gap: 0.5rem;">
+        <div style="display: flex; gap: 0.5rem; align-items: center;">
+          <button onclick="switchStudentTab('dispute')" class="btn btn-sm" style="background: #fee2e2; border: 1px solid #fca5a5; color: #b91c1c; font-weight: 700; display: inline-flex; align-items: center; gap: 0.35rem;">
+            🚨 Report Authority
+          </button>
           <button onclick="refreshStudentHistory()" class="btn btn-outline btn-sm" title="Refresh Grievance Status">
             🔄 Refresh Status
           </button>
@@ -130,6 +133,9 @@
         </button>
         <button id="tabBtnSearch" onclick="switchStudentTab('search')" class="student-tab-btn">
           🔍 Track by Ticket ID
+        </button>
+        <button id="tabBtnDispute" onclick="switchStudentTab('dispute')" class="student-tab-btn" style="color: #b91c1c; font-weight: 700;">
+          🚨 Report Authority to Principal
         </button>
       </div>
 
@@ -365,12 +371,91 @@
         </section>
       </div>
 
+      <!-- TAB 4: REPORT AUTHORITY / FAKE RESOLUTION TO PRINCIPAL -->
+      <div id="tabContentDispute" class="tab-pane" style="display: none;">
+        <section class="card" style="border-top: 4px solid #dc2626;">
+          <div class="card-header">
+            <div style="display: flex; align-items: center; gap: 0.5rem; margin-bottom: 0.25rem;">
+              <span style="font-size: 1.5rem;">🚨</span>
+              <h2 class="card-title" style="color: #991b1b; margin: 0;">Raise Complaint on Authority / Report Fake Resolution</h2>
+            </div>
+            <p class="card-subtitle">
+              If an authority marked your complaint as resolved without actually fixing it, or failed to take action within SLA, file an official executive dispute directly with the Office of the Principal (<strong>717824v132@kce.ac.in</strong>).
+            </p>
+          </div>
+
+          <form id="tabDisputeForm" onsubmit="submitTabDispute(event)" style="margin-top: 1rem;">
+            <div class="form-group">
+              <label for="tabDisputeTicketSelect" style="font-weight: 600;">Select Grievance Ticket</label>
+              <select id="tabDisputeTicketSelect" class="form-control" onchange="handleTabDisputeTicketChange(this.value)">
+                <option value="">-- Choose from your submitted grievances or type ticket ID below --</option>
+              </select>
+            </div>
+
+            <div class="form-group">
+              <label for="tabDisputeTicketInput" style="font-weight: 600;">Complaint Ticket ID <span style="color: #dc2626;">*</span></label>
+              <input 
+                type="text" 
+                id="tabDisputeTicketInput" 
+                class="form-control" 
+                placeholder="e.g. v134_t1 or 6" 
+                style="font-family: var(--font-mono); font-weight: 700; color: var(--primary);"
+                required>
+              <span style="font-size: 0.78rem; color: var(--text-muted); display: block; margin-top: 0.25rem;">
+                Enter your Ticket ID (e.g. <code>v134_t1</code>) or numeric ID (e.g. <code>6</code>).
+              </span>
+            </div>
+
+            <div class="form-group">
+              <label for="tabDisputeAuthoritySelect" style="font-weight: 600;">Authority Being Reported <span style="color: #dc2626;">*</span></label>
+              <select id="tabDisputeAuthoritySelect" class="form-control" required>
+                <option value="Warden">Warden (Hostels)</option>
+                <option value="Mess Committee">Mess Committee (Dining & Catering)</option>
+                <option value="Estate Office">Estate Office (Campus Infrastructure & Electricity)</option>
+                <option value="Exam Cell Admin">Exam Cell Admin (Examinations, Marks & Fees)</option>
+                <option value="Counseling Cell">Counseling Cell (Student Support)</option>
+                <option value="Dean of Student Affairs">Dean of Student Affairs</option>
+                <option value="Dean of Academics">Dean of Academics</option>
+                <option value="Vice Principal">Vice Principal</option>
+              </select>
+            </div>
+
+            <div class="form-group">
+              <label for="tabDisputeReasonSelect" style="font-weight: 600;">Type of Complaint on Authority <span style="color: #dc2626;">*</span></label>
+              <select id="tabDisputeReasonSelect" class="form-control" required>
+                <option value="Fake Resolution (Claimed resolved without fixing)">Fake Resolution (Marked resolved but issue still persists)</option>
+                <option value="Complete Inaction / Authority Unresponsive">Complete Inaction / Authority unresponsive</option>
+                <option value="Improper Conduct / Dismissive Behavior">Improper Conduct / Dismissive behavior</option>
+                <option value="Unsatisfactory Partial Fix">Unsatisfactory Partial Fix</option>
+                <option value="Other Authority Malpractice">Other Authority Malpractice</option>
+              </select>
+            </div>
+
+            <div class="form-group">
+              <label for="tabDisputeDescInput" style="font-weight: 600;">Detailed Description & Evidence <span style="color: #dc2626;">*</span></label>
+              <textarea 
+                id="tabDisputeDescInput" 
+                class="form-control" 
+                rows="5" 
+                placeholder="Explain in detail how the authority failed or how the resolution was fake (e.g., 'Authority marked resolved on Monday claiming tap was repaired, but water is still leaking onto the floor...'). This will be directly emailed to Principal at 717824v132@kce.ac.in." 
+                required></textarea>
+            </div>
+
+            <div id="tabDisputeStatusAlert" style="display: none; padding: 0.85rem 1rem; border-radius: var(--radius-sm); margin-bottom: 1.25rem; font-size: 0.9rem;"></div>
+
+            <button type="submit" id="btnTabDisputeSubmit" class="btn btn-primary btn-full" style="background: #dc2626; border-color: #b91c1c; height: 46px; font-weight: 700; font-size: 1rem;">
+              🚨 Send Official Report to Principal (717824v132@kce.ac.in)
+            </button>
+          </form>
+        </section>
+      </div>
+
     </div>
   </main>
 
   <!-- MODAL: Raise Complaint on Authority / Fake Resolution to Principal -->
-  <div id="disputeAuthorityModal" style="display: none; position: fixed; inset: 0; background: rgba(15, 23, 42, 0.65); backdrop-filter: blur(4px); z-index: 1000; align-items: center; justify-content: center; padding: 1rem;">
-    <div class="card" style="max-width: 550px; width: 100%; border: 1px solid var(--border-color); box-shadow: 0 20px 25px -5px rgba(0,0,0,0.25); border-radius: var(--radius-lg); overflow: hidden; background: #ffffff; padding: 0;">
+  <div id="disputeAuthorityModal" onclick="if(event.target === this) closeDisputeModal()" style="display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(15, 23, 42, 0.75); backdrop-filter: blur(4px); z-index: 99999; align-items: center; justify-content: center; padding: 1rem; box-sizing: border-box;">
+    <div class="card" style="max-width: 550px; width: 100%; max-height: 90vh; overflow-y: auto; border: 1px solid var(--border-color); box-shadow: 0 20px 25px -5px rgba(0,0,0,0.3); border-radius: var(--radius-lg); background: #ffffff; padding: 0;">
       <div style="background: linear-gradient(135deg, #991b1b 0%, #dc2626 100%); color: #ffffff; padding: 1.25rem 1.5rem; display: flex; justify-content: space-between; align-items: center;">
         <div style="display: flex; align-items: center; gap: 0.6rem;">
           <span style="font-size: 1.5rem;">🚨</span>
@@ -383,22 +468,34 @@
       </div>
       
       <form id="disputeAuthorityForm" style="padding: 1.5rem;" onsubmit="submitDisputeAuthority(event)">
-        <input type="hidden" id="disputeTicketId" value="">
-
         <div class="form-group" style="margin-bottom: 1rem;">
-          <label style="font-weight: 600; font-size: 0.85rem; color: var(--text-main);">Target Ticket Reference</label>
-          <div id="disputeTicketDisplay" style="font-family: var(--font-mono); font-weight: 700; color: var(--primary); font-size: 0.95rem; background: var(--bg-main); padding: 0.5rem 0.75rem; border-radius: var(--radius-sm); border: 1px solid var(--border-color);">
-            --
-          </div>
+          <label for="disputeTicketId" style="font-weight: 600; font-size: 0.85rem; color: var(--text-main);">Target Ticket ID / Reference <span style="color: #dc2626;">*</span></label>
+          <input 
+            type="text" 
+            id="disputeTicketId" 
+            class="form-control" 
+            placeholder="e.g. v134_t1 or 6" 
+            style="font-family: var(--font-mono); font-weight: 700; color: var(--primary);" 
+            required>
         </div>
 
         <div class="form-group" style="margin-bottom: 1rem;">
-          <label for="disputeAuthorityName" style="font-weight: 600; font-size: 0.85rem; color: var(--text-main);">Authority Being Reported</label>
-          <input type="text" id="disputeAuthorityName" class="form-control" readonly style="background: var(--bg-main); color: var(--text-main); font-weight: 600;">
+          <label for="disputeAuthorityName" style="font-weight: 600; font-size: 0.85rem; color: var(--text-main);">Authority Being Reported <span style="color: #dc2626;">*</span></label>
+          <select id="disputeAuthorityName" class="form-control" required>
+            <option value="Warden">Warden (Hostels)</option>
+            <option value="Mess Committee">Mess Committee (Dining & Catering)</option>
+            <option value="Estate Office">Estate Office (Campus Infrastructure)</option>
+            <option value="Exam Cell Admin">Exam Cell Admin (Exams, Marks & Fees)</option>
+            <option value="Counseling Cell">Counseling Cell (Student Support)</option>
+            <option value="Dean of Student Affairs">Dean of Student Affairs</option>
+            <option value="Dean of Academics">Dean of Academics</option>
+            <option value="Vice Principal">Vice Principal</option>
+            <option value="Assigned Authority">Other / Assigned Authority</option>
+          </select>
         </div>
 
         <div class="form-group" style="margin-bottom: 1rem;">
-          <label for="disputeReason" style="font-weight: 600; font-size: 0.85rem; color: var(--text-main);">Type of Grievance on Authority</label>
+          <label for="disputeReason" style="font-weight: 600; font-size: 0.85rem; color: var(--text-main);">Type of Grievance on Authority <span style="color: #dc2626;">*</span></label>
           <select id="disputeReason" class="form-control" required>
             <option value="Fake Resolution (Claimed resolved without fixing)">Fake Resolution (Marked resolved but issue still persists)</option>
             <option value="Complete Inaction / Authority Unresponsive">Complete Inaction / Authority unresponsive</option>
@@ -412,7 +509,7 @@
           <label for="disputeDescription" style="font-weight: 600; font-size: 0.85rem; color: var(--text-main);">
             Description & Evidence <span style="color: #dc2626;">*</span>
           </label>
-          <textarea id="disputeDescription" class="form-control" rows="4" placeholder="Describe how the authority failed or how the resolution was fake (e.g. 'Authority marked resolved on Monday claiming tap was repaired, but water is still leaking onto the floor...'). This will be directly emailed to the Principal." required></textarea>
+          <textarea id="disputeDescription" class="form-control" rows="4" placeholder="Describe how the authority failed or how the resolution was fake (e.g. 'Authority marked resolved on Monday claiming tap was repaired, but water is still leaking onto the floor...'). This will be directly emailed to the Principal at 717824v132@kce.ac.in." required></textarea>
         </div>
 
         <div id="disputeStatusMsg" style="display: none; padding: 0.75rem; border-radius: var(--radius-sm); margin-bottom: 1rem; font-size: 0.85rem;"></div>
@@ -432,6 +529,6 @@
   </footer>
 
   <script src="config.js?v=2.4"></script>
-  <script src="app.js?v=2.5"></script>
+  <script src="app.js?v=2.6"></script>
 </body>
 </html>

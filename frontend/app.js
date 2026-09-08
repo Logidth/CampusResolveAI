@@ -183,6 +183,7 @@ window.switchStudentTab = function (tabName) {
     submit: { btn: "tabBtnSubmit", content: "tabContentSubmit" },
     history: { btn: "tabBtnHistory", content: "tabContentHistory" },
     search: { btn: "tabBtnSearch", content: "tabContentSearch" },
+    dispute: { btn: "tabBtnDispute", content: "tabContentDispute" },
   };
 
   Object.keys(tabs).forEach((key) => {
@@ -200,6 +201,8 @@ window.switchStudentTab = function (tabName) {
     if (c) c.style.display = "block";
     if (tabName === "history") {
       loadStudentHistory();
+    } else if (tabName === "dispute") {
+      populateTabDisputeTickets();
     }
   }
 };
@@ -616,39 +619,169 @@ if (trackForm) {
   });
 }
 
-// Dispute / Report Authority to Principal Handlers
+// =======================================================
+// DISPUTE & REPORT AUTHORITY TO PRINCIPAL HANDLERS
+// =======================================================
 let currentTrackedTicket = "";
 let currentTrackedAuthority = "";
+
+window.populateTabDisputeTickets = function() {
+  const select = document.getElementById("tabDisputeTicketSelect");
+  if (!select) return;
+
+  select.innerHTML = '<option value="">-- Choose from your submitted grievances or type ticket ID below --</option>';
+
+  if (cachedStudentComplaints && cachedStudentComplaints.length > 0) {
+    cachedStudentComplaints.forEach((c) => {
+      const opt = document.createElement("option");
+      const ticketRef = c.ticket_id || c.id;
+      opt.value = ticketRef;
+      opt.setAttribute("data-auth", c.assigned_authority || "Estate Office");
+      const statusText = (c.status || "open").toUpperCase();
+      const snippet = c.text.length > 50 ? c.text.substring(0, 50) + "..." : c.text;
+      opt.innerText = `[${ticketRef}] ${statusText} - ${snippet} (${c.assigned_authority || 'Unassigned'})`;
+      select.appendChild(opt);
+    });
+  }
+};
+
+window.handleTabDisputeTicketChange = function(val) {
+  const input = document.getElementById("tabDisputeTicketInput");
+  const authSelect = document.getElementById("tabDisputeAuthoritySelect");
+  const select = document.getElementById("tabDisputeTicketSelect");
+
+  if (input) input.value = val || "";
+  if (val && select && authSelect) {
+    const opt = select.options[select.selectedIndex];
+    const assignedAuth = opt ? opt.getAttribute("data-auth") : "";
+    if (assignedAuth) {
+      authSelect.value = assignedAuth;
+    }
+  }
+};
+
+window.submitTabDispute = async function(e) {
+  e.preventDefault();
+  const ticketInput = document.getElementById("tabDisputeTicketInput");
+  const authSelect = document.getElementById("tabDisputeAuthoritySelect");
+  const reasonSelect = document.getElementById("tabDisputeReasonSelect");
+  const descInput = document.getElementById("tabDisputeDescInput");
+  const statusAlert = document.getElementById("tabDisputeStatusAlert");
+  const submitBtn = document.getElementById("btnTabDisputeSubmit");
+
+  const ticketRef = ticketInput ? ticketInput.value.trim() : "";
+  const reportedAuth = authSelect ? authSelect.value : "Warden";
+  const reason = reasonSelect ? reasonSelect.value : "Fake Resolution";
+  const description = descInput ? descInput.value.trim() : "";
+
+  if (!ticketRef) {
+    alert("Please enter or choose a Complaint Ticket ID.");
+    if (ticketInput) ticketInput.focus();
+    return;
+  }
+  if (!description) {
+    alert("Please explain why you are reporting this authority to the Principal.");
+    if (descInput) descInput.focus();
+    return;
+  }
+
+  const studentUser = getStudentUser();
+  const studentToken = getStudentToken() || getAuthToken();
+
+  if (submitBtn) {
+    submitBtn.disabled = true;
+    submitBtn.innerText = "🚨 Dispatching Report to Principal (717824v132@kce.ac.in)...";
+  }
+
+  if (statusAlert) statusAlert.style.display = "none";
+
+  try {
+    const res = await fetch(`${API_BASE}/complaints/${encodeURIComponent(ticketRef)}/dispute`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        ...(studentToken ? { "Authorization": `Bearer ${studentToken}` } : {})
+      },
+      body: JSON.stringify({
+        reason: reason,
+        description: description,
+        reported_authority: reportedAuth,
+        student_email: studentUser ? studentUser.email : undefined
+      })
+    });
+
+    const data = await res.json();
+    if (!res.ok) {
+      throw new Error(data.detail || "Failed to submit report to Principal.");
+    }
+
+    if (statusAlert) {
+      statusAlert.style.display = "block";
+      statusAlert.style.background = "#f0fdf4";
+      statusAlert.style.border = "1px solid #86efac";
+      statusAlert.style.color = "#15803d";
+      statusAlert.innerHTML = `
+        <div style="font-weight: 700; font-size: 1rem; margin-bottom: 0.35rem;">✅ Report Dispatched Directly to Principal!</div>
+        <div style="font-size: 0.9rem; line-height: 1.4;">${data.message || 'The complaint has been escalated to Level 2 under the Principal with an urgent executive SLA.'}</div>
+      `;
+    }
+
+    if (descInput) descInput.value = "";
+    loadStudentHistory();
+    setTimeout(() => {
+      switchStudentTab("history");
+    }, 2200);
+  } catch (err) {
+    if (statusAlert) {
+      statusAlert.style.display = "block";
+      statusAlert.style.background = "#fef2f2";
+      statusAlert.style.border = "1px solid #fca5a5";
+      statusAlert.style.color = "#b91c1c";
+      statusAlert.innerHTML = `<strong>Submission Error:</strong> ${err.message}`;
+    }
+  } finally {
+    if (submitBtn) {
+      submitBtn.disabled = false;
+      submitBtn.innerText = "🚨 Send Official Report to Principal (717824v132@kce.ac.in)";
+    }
+  }
+};
 
 window.openDisputeFromTracker = function() {
   if (currentTrackedTicket) {
     openDisputeModal(currentTrackedTicket, currentTrackedAuthority);
   } else {
     const entered = trackIdInput ? trackIdInput.value.trim() : "";
-    if (entered) {
-      openDisputeModal(entered, "Assigned Authority");
-    }
+    openDisputeModal(entered || "", "Assigned Authority");
   }
 };
 
 window.openDisputeModal = function(ticketRef, authorityName) {
   const modal = document.getElementById("disputeAuthorityModal");
   if (!modal) return;
-  
+
   const ticketInput = document.getElementById("disputeTicketId");
-  const ticketDisplay = document.getElementById("disputeTicketDisplay");
-  const authInput = document.getElementById("disputeAuthorityName");
+  const authSelect = document.getElementById("disputeAuthorityName");
   const descInput = document.getElementById("disputeDescription");
   const statusMsg = document.getElementById("disputeStatusMsg");
-  
+
   if (statusMsg) statusMsg.style.display = "none";
   if (descInput) descInput.value = "";
-  
+
   if (ticketInput) ticketInput.value = ticketRef || "";
-  if (ticketDisplay) ticketDisplay.innerText = ticketRef || "Select or enter ticket";
-  if (authInput) authInput.value = authorityName || "Assigned Authority";
-  
+  if (authSelect && authorityName) {
+    for (let i = 0; i < authSelect.options.length; i++) {
+      if (authSelect.options[i].value === authorityName || authorityName.includes(authSelect.options[i].value)) {
+        authSelect.selectedIndex = i;
+        break;
+      }
+    }
+  }
+
   modal.style.display = "flex";
+  if (!ticketRef && ticketInput) {
+    setTimeout(() => ticketInput.focus(), 150);
+  }
 };
 
 window.closeDisputeModal = function() {
@@ -658,22 +791,32 @@ window.closeDisputeModal = function() {
 
 window.submitDisputeAuthority = async function(e) {
   e.preventDefault();
-  const ticketRef = document.getElementById("disputeTicketId")?.value;
-  const reason = document.getElementById("disputeReason")?.value;
-  const description = document.getElementById("disputeDescription")?.value?.trim();
+  const ticketInput = document.getElementById("disputeTicketId");
+  const authSelect = document.getElementById("disputeAuthorityName");
+  const reasonSelect = document.getElementById("disputeReason");
+  const descInput = document.getElementById("disputeDescription");
   const statusMsg = document.getElementById("disputeStatusMsg");
   const submitBtn = document.getElementById("disputeSubmitBtn");
-  
+
+  const ticketRef = ticketInput ? ticketInput.value.trim() : "";
+  const reportedAuth = authSelect ? authSelect.value : undefined;
+  const reason = reasonSelect ? reasonSelect.value : "Fake Resolution";
+  const description = descInput ? descInput.value.trim() : "";
+
   if (!ticketRef) {
-    alert("Ticket reference is required.");
+    alert("Please enter the Complaint Ticket ID.");
+    if (ticketInput) ticketInput.focus();
     return;
   }
   if (!description) {
     alert("Please provide details explaining why you are reporting this authority to the Principal.");
+    if (descInput) descInput.focus();
     return;
   }
 
-  const token = getStudentToken();
+  const studentUser = getStudentUser();
+  const token = getStudentToken() || getAuthToken();
+
   if (submitBtn) {
     submitBtn.disabled = true;
     submitBtn.innerText = "Dispatching report to Principal...";
@@ -688,7 +831,9 @@ window.submitDisputeAuthority = async function(e) {
       },
       body: JSON.stringify({
         reason: reason,
-        description: description
+        description: description,
+        reported_authority: reportedAuth,
+        student_email: studentUser ? studentUser.email : undefined
       })
     });
 
@@ -700,8 +845,8 @@ window.submitDisputeAuthority = async function(e) {
     if (statusMsg) {
       statusMsg.style.display = "block";
       statusMsg.style.background = "#f0fdf4";
-      statusMsg.style.border = "1px solid #bbf7d0";
-      statusMsg.style.color = "#166534";
+      statusMsg.style.border = "1px solid #86efac";
+      statusMsg.style.color = "#15803d";
       statusMsg.innerHTML = `<strong>Escalation Successful:</strong> ${data.message || "Dispatched directly to Principal (717824v132@kce.ac.in)."}`;
     }
 
@@ -711,7 +856,7 @@ window.submitDisputeAuthority = async function(e) {
       if (trackIdInput && trackIdInput.value === ticketRef) {
         loadComplaintDetails(ticketRef);
       }
-    }, 1600);
+    }, 1800);
   } catch (err) {
     if (statusMsg) {
       statusMsg.style.display = "block";

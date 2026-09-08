@@ -774,6 +774,49 @@ def get_student_complaints(
     }
 
 
+def find_complaint_by_ref(db: Session, id_or_ticket: str) -> Optional[Complaint]:
+    """
+    Locates a complaint record flexibly by:
+    - Numeric complaint ID: 6, #6
+    - Masked authority ticket: TICKET-6
+    - Student ticket code: v134_t1, V134_T1 (case-insensitive)
+    - Suffix fallback: prefix_t6 -> ID 6
+    """
+    if not id_or_ticket:
+        return None
+    raw = id_or_ticket.strip()
+    clean_ref = raw.lstrip("#").strip()
+
+    # 1. Direct integer ID
+    if clean_ref.isdigit():
+        c = db.query(Complaint).filter(Complaint.id == int(clean_ref)).first()
+        if c:
+            return c
+
+    # 2. TICKET-12 format
+    if clean_ref.upper().startswith("TICKET-"):
+        parts = clean_ref.split("-", 1)
+        if len(parts) == 2 and parts[1].isdigit():
+            c = db.query(Complaint).filter(Complaint.id == int(parts[1])).first()
+            if c:
+                return c
+
+    # 3. Exact ticket_id (case-insensitive)
+    c = db.query(Complaint).filter(func.lower(Complaint.ticket_id) == clean_ref.lower()).first()
+    if c:
+        return c
+
+    # 4. Fallback: prefix_t12 format (e.g. v134_t12)
+    if "_t" in clean_ref.lower():
+        parts = clean_ref.lower().split("_t")
+        if len(parts) == 2 and parts[1].isdigit():
+            c = db.query(Complaint).filter(Complaint.id == int(parts[1])).first()
+            if c:
+                return c
+
+    return None
+
+
 @app.get("/complaints/{id_or_ticket}", response_model=ComplaintDetailOut)
 def get_complaint(
     id_or_ticket: str,
@@ -786,14 +829,9 @@ def get_complaint(
     - Students can ONLY inspect grievances filed under their own account (searching other tickets like v167_t1 returns 403 Forbidden).
     - Authorities cannot see student roll numbers or identity (anonymized to TICKET-#).
     """
-    clean_ref = id_or_ticket.strip()
-    if clean_ref.isdigit():
-        complaint = db.query(Complaint).filter(Complaint.id == int(clean_ref)).first()
-    else:
-        complaint = db.query(Complaint).filter(Complaint.ticket_id == clean_ref).first()
-
+    complaint = find_complaint_by_ref(db, id_or_ticket)
     if not complaint:
-        raise HTTPException(status_code=404, detail=f"Complaint ticket '{clean_ref}' not found")
+        raise HTTPException(status_code=404, detail=f"Complaint ticket '{id_or_ticket.strip()}' not found")
 
     current_user = get_optional_user(authorization, db)
 
@@ -878,6 +916,8 @@ class ComplaintResolveRequest(BaseModel):
 class DisputeAuthorityRequest(BaseModel):
     reason: Optional[str] = "Fake resolution or unresolved failure"
     description: str
+    student_email: Optional[str] = None
+    reported_authority: Optional[str] = None
 
 
 class TestEmailRequest(BaseModel):
@@ -1031,34 +1071,32 @@ def dispute_complaint_resolution(
     2-hour SLA, records an audit log entry, and dispatches a high-priority alert email
     to the Principal (717824v132@kce.ac.in).
     """
-    clean_ref = id_or_ticket.strip()
-    if clean_ref.isdigit():
-        complaint = db.query(Complaint).filter(Complaint.id == int(clean_ref)).first()
-    else:
-        complaint = db.query(Complaint).filter(Complaint.ticket_id == clean_ref).first()
-
+    complaint = find_complaint_by_ref(db, id_or_ticket)
     if not complaint:
-        raise HTTPException(status_code=404, detail=f"Complaint ticket '{clean_ref}' not found")
+        raise HTTPException(status_code=404, detail=f"Complaint ticket '{id_or_ticket.strip()}' not found. Please verify the ticket ID.")
 
     current_user = get_optional_user(authorization, db)
+    provided_email = payload.student_email.strip().lower() if payload.student_email else None
 
     # Validate student ownership
     if current_user and current_user.role == "Student":
-        if not complaint.student_email or complaint.student_email.strip().lower() != current_user.email.strip().lower():
+        if complaint.student_email and complaint.student_email.strip().lower() != current_user.email.strip().lower():
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail="Access restricted: You can only raise a dispute for grievances filed under your own student account."
             )
     elif complaint.student_email:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Authentication required: Please sign in with your student credentials to report an authority."
-        )
+        # If unauthenticated, allow if provided student_email matches
+        if not provided_email or provided_email != complaint.student_email.strip().lower():
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Authentication required: Please sign in or provide your registered @kce.ac.in student email to dispute this grievance."
+            )
 
     if not payload.description or not payload.description.strip():
         raise HTTPException(status_code=400, detail="Description is required to report an authority to the Principal.")
 
-    previous_authority = complaint.assigned_authority or "Assigned Authority"
+    previous_authority = payload.reported_authority or complaint.assigned_authority or "Assigned Authority"
     ticket_ref = complaint.ticket_id or f"t{complaint.id}"
 
     # Reopen and escalate to Principal

@@ -191,10 +191,16 @@ def health_check():
     """Health check and configuration diagnostics endpoint."""
     smtp_user = os.getenv("SMTP_USER") or os.getenv("SMTP_USERNAME")
     smtp_pass = bool(os.getenv("SMTP_PASSWORD"))
+    resend_key = bool(os.getenv("RESEND_API_KEY"))
+    brevo_key = bool(os.getenv("BREVO_API_KEY"))
+    email_mode = "resend_api" if resend_key else ("brevo_api" if brevo_key else ("smtp" if (smtp_user and smtp_pass) else "none"))
     return {
         "status": "CampusResolve agent running",
+        "email_configured": bool(resend_key or brevo_key or (smtp_user and smtp_pass)),
+        "email_mode": email_mode,
         "smtp_configured": bool(smtp_user and smtp_pass),
         "smtp_user": smtp_user if smtp_user else "NOT_SET",
+        "resend_configured": resend_key,
         "groq_configured": bool(os.getenv("GROQ_API_KEY")),
         "model": os.getenv("GROQ_MODEL", "openai/gpt-oss-20b")
     }

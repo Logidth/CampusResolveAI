@@ -25,3 +25,7 @@ services:
         sync: false
       - key: BASE_URL
         value: https://campusresolveai.onrender.com
+      - key: RESEND_API_KEY
+        sync: false
+      - key: BREVO_API_KEY
+        sync: false

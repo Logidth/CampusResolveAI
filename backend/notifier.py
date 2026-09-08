@@ -98,11 +98,11 @@ def _dispatch_smtp(recipient_email: str, subject: str, plain_body: str, html_bod
     global _last_smtp_error
     _last_smtp_error = ""
 
-    smtp_host = os.getenv("SMTP_HOST", "smtp.gmail.com")
-    smtp_port = int(os.getenv("SMTP_PORT", "587"))
-    smtp_user = os.getenv("SMTP_USER") or os.getenv("SMTP_USERNAME")
-    smtp_pass = os.getenv("SMTP_PASSWORD")
-    smtp_from = os.getenv("SMTP_FROM_EMAIL") or os.getenv("SMTP_FROM") or smtp_user or "alerts@campusresolve.edu"
+    smtp_host = (os.getenv("SMTP_HOST") or "smtp.gmail.com").strip()
+    smtp_port = int((os.getenv("SMTP_PORT") or "587").strip())
+    smtp_user = (os.getenv("SMTP_USER") or os.getenv("SMTP_USERNAME") or "").strip()
+    smtp_pass = (os.getenv("SMTP_PASSWORD") or "").strip().replace(" ", "")
+    smtp_from = (os.getenv("SMTP_FROM_EMAIL") or os.getenv("SMTP_FROM") or smtp_user or "alerts@campusresolve.edu").strip()
 
     if not smtp_user or not smtp_pass:
         _last_smtp_error = "SMTP_USER or SMTP_PASSWORD is not set in environment variables."
@@ -133,11 +133,11 @@ def _dispatch_smtp(recipient_email: str, subject: str, plain_body: str, html_bod
         # Attempt 1: Configured port (usually 587 with STARTTLS)
         try:
             if smtp_port == 465:
-                with smtplib.SMTP_SSL(smtp_host, smtp_port, timeout=15) as server:
+                with smtplib.SMTP_SSL(smtp_host, smtp_port, timeout=25) as server:
                     server.login(smtp_user, smtp_pass)
                     server.send_message(msg)
             else:
-                with smtplib.SMTP(smtp_host, smtp_port, timeout=15) as server:
+                with smtplib.SMTP(smtp_host, smtp_port, timeout=25) as server:
                     server.starttls()
                     server.login(smtp_user, smtp_pass)
                     server.send_message(msg)
@@ -150,7 +150,7 @@ def _dispatch_smtp(recipient_email: str, subject: str, plain_body: str, html_bod
         # Attempt 2: Fallback to SSL on port 465 (handles networks blocking STARTTLS)
         if not sent:
             try:
-                with smtplib.SMTP_SSL(smtp_host, 465, timeout=15) as server:
+                with smtplib.SMTP_SSL(smtp_host, 465, timeout=25) as server:
                     server.login(smtp_user, smtp_pass)
                     server.send_message(msg)
                 logger.info(f"[SMTP SUCCESS] Real email delivered to {target} via port 465 fallback")

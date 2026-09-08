@@ -13,6 +13,7 @@ class Complaint(Base):
     urgency = Column(String(50), nullable=True)
     status = Column(String(50), default="open", nullable=False)
     assigned_authority = Column(String(150), nullable=True)
+    initial_authority = Column(String(150), nullable=True)
     escalation_level = Column(Integer, default=0, nullable=False)
     no_auto_escalation = Column(Boolean, default=False, nullable=False)
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)

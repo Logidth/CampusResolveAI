@@ -278,6 +278,8 @@ const roleLockIndicator = document.getElementById("roleLockIndicator");
 const terminalTitleLabel = document.getElementById("terminalTitleLabel");
 const tableHeaderTitle = document.getElementById("tableHeaderTitle");
 const showOnlyOpenCheckbox = document.getElementById("showOnlyOpen");
+const showOnlyEscalatedCheckbox = document.getElementById("showOnlyEscalated");
+const statBoxEscalated = document.getElementById("statBoxEscalated");
 const counselorCountBadge = document.getElementById("counselorCountBadge");
 
 // User Session Banner Elements
@@ -671,12 +673,23 @@ if (authLoggedOutView && authLoggedInView) {
       document.getElementById("statResolved").innerText = resolvedCount;
 
       const showOnlyOpen = showOnlyOpenCheckbox ? showOnlyOpenCheckbox.checked : true;
-      const displayList = showOnlyOpen ? openList : list;
+      const showOnlyEscalated = showOnlyEscalatedCheckbox ? showOnlyEscalatedCheckbox.checked : false;
+
+      let displayList = list;
+      if (showOnlyOpen) {
+        displayList = displayList.filter((c) => c.status === "open");
+      }
+      if (showOnlyEscalated) {
+        displayList = displayList.filter((c) => c.escalation_level > 0);
+      }
 
       if (displayList.length === 0) {
-        const msg = showOnlyOpen 
-          ? `No open complaints assigned to ${currentAuthority}.` 
-          : `No complaints recorded for ${currentAuthority}.`;
+        let msg = `No complaints recorded for ${currentAuthority}.`;
+        if (showOnlyEscalated) {
+          msg = `No escalated grievances recorded for ${currentAuthority}.`;
+        } else if (showOnlyOpen) {
+          msg = `No open complaints assigned to ${currentAuthority}.`;
+        }
         complaintsTableBody.innerHTML = `<tr><td colspan="9" style="text-align: center; color: var(--text-muted); padding: 2rem;">${msg}</td></tr>`;
         return;
       }
@@ -690,6 +703,7 @@ if (authLoggedOutView && authLoggedInView) {
           (c) => {
             const isDeepMatch = deepId && c.id === deepId;
             const rowHighlight = isDeepMatch ? `style="background: #eff6ff; border-left: 4px solid var(--primary);"` : "";
+            const isEscalatedFromSelf = c.initial_authority && c.initial_authority !== c.assigned_authority;
             return `
         <tr id="row-complaint-${c.id}" ${rowHighlight}>
           <td><strong style="color: var(--primary);">#${c.id}</strong></td>
@@ -698,7 +712,10 @@ if (authLoggedOutView && authLoggedInView) {
           </td>
           <td><span style="font-weight: 500;">${c.category || 'General'}</span></td>
           <td>${getUrgencyBadge(c.urgency)}</td>
-          <td><span style="font-weight: 600; color: var(--text-main);">${c.assigned_authority || 'Unassigned'}</span></td>
+          <td>
+            <span style="font-weight: 600; color: var(--text-main);">${c.assigned_authority || 'Unassigned'}</span>
+            ${isEscalatedFromSelf ? `<div style="font-size: 0.72rem; color: #dc2626; font-weight: 600; margin-top: 2px;">⚡ Escalated from ${c.initial_authority}</div>` : ''}
+          </td>
           <td>${getEscalationBadge(c.escalation_level)}</td>
           <td>${getStatusBadge(c.status)}</td>
           <td><span style="font-size: 0.8rem; color: var(--text-muted);">${formatDate(c.sla_deadline)}</span></td>
@@ -930,6 +947,17 @@ if (authLoggedOutView && authLoggedInView) {
   
   showOnlyOpenCheckbox?.addEventListener("change", () => {
     loadDashboardComplaints();
+  });
+
+  showOnlyEscalatedCheckbox?.addEventListener("change", () => {
+    loadDashboardComplaints();
+  });
+
+  statBoxEscalated?.addEventListener("click", () => {
+    if (showOnlyEscalatedCheckbox) {
+      showOnlyEscalatedCheckbox.checked = !showOnlyEscalatedCheckbox.checked;
+      loadDashboardComplaints();
+    }
   });
 }
 

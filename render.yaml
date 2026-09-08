@@ -11,6 +11,8 @@ services:
         sync: false
       - key: GROQ_MODEL
         value: openai/gpt-oss-20b
+      - key: DEBUG_TIME_SCALE
+        value: "720"
       - key: MOCK_MODE
         value: "false"
       - key: SMTP_HOST

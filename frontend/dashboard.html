@@ -190,8 +190,8 @@
           <div class="stat-label">Open / Action Required</div>
           <div id="statOpen" class="stat-value" style="color: var(--primary);">0</div>
         </div>
-        <div class="stat-box">
-          <div class="stat-label">Escalated Tickets</div>
+        <div class="stat-box" id="statBoxEscalated" style="cursor: pointer;" title="Click to filter only escalated grievances">
+          <div class="stat-label">Escalated Tickets ⚡</div>
           <div id="statEscalated" class="stat-value" style="color: var(--danger);">0</div>
         </div>
         <div class="stat-box">
@@ -220,8 +220,8 @@
           </div>
         </div>
 
-        <div id="terminalBody" class="terminal-body">
-          <div class="term-empty">Connecting to real-time grievance stream...</div>
+        <div id="terminalActivityFeed" class="terminal-body">
+          <div class="term-line term-dim">Connecting to autonomous escalation stream...</div>
         </div>
       </section>
 
@@ -242,9 +242,12 @@
             <h2 class="card-title" id="tableHeaderTitle">Complaints Queue</h2>
             <p class="card-subtitle">Grievances assigned to your jurisdiction requiring review or resolution</p>
           </div>
-          <div style="display: flex; gap: 0.5rem; align-items: center;">
+          <div style="display: flex; gap: 1rem; align-items: center; flex-wrap: wrap;">
             <label style="font-size: 0.8rem; color: var(--text-muted); cursor: pointer; display: flex; align-items: center; gap: 0.35rem;">
               <input type="checkbox" id="showOnlyOpen" checked> Only Open
+            </label>
+            <label style="font-size: 0.8rem; color: #dc2626; font-weight: 600; cursor: pointer; display: flex; align-items: center; gap: 0.35rem;">
+              <input type="checkbox" id="showOnlyEscalated"> 🚨 Only Escalated
             </label>
           </div>
         </div>

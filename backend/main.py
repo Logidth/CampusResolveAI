@@ -41,9 +41,15 @@ Base.metadata.create_all(bind=engine)
 # FastAPI Lifespan
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # Seed default authority user accounts on boot
+    # Seed default authority user accounts & auto-migrate columns on boot
     db = next(get_db())
     try:
+        try:
+            from sqlalchemy import text
+            db.execute(text("ALTER TABLE complaints ADD COLUMN initial_authority VARCHAR(150)"))
+            db.commit()
+        except Exception:
+            db.rollback()
         seed_authority_users(db)
     finally:
         db.close()
@@ -121,6 +127,7 @@ class ComplaintOut(BaseModel):
     urgency: Optional[str] = None
     status: str
     assigned_authority: Optional[str] = None
+    initial_authority: Optional[str] = None
     escalation_level: int
     no_auto_escalation: bool = False
     created_at: datetime
@@ -215,15 +222,33 @@ def root():
 
 
 @app.get("/health")
-def health_check():
-    """Health check and configuration diagnostics endpoint."""
+def health_check(db: Session = Depends(get_db)):
+    """Health check and configuration diagnostics endpoint with database persistence metrics."""
     smtp_user = os.getenv("SMTP_USER") or os.getenv("SMTP_USERNAME")
     smtp_pass = bool(os.getenv("SMTP_PASSWORD"))
     resend_key = bool(os.getenv("RESEND_API_KEY"))
     brevo_key = bool(os.getenv("BREVO_API_KEY"))
     email_mode = "brevo_api" if brevo_key else ("resend_api" if resend_key else ("smtp" if (smtp_user and smtp_pass) else "none"))
+    
+    total_complaints = db.query(Complaint).count()
+    open_complaints = db.query(Complaint).filter(Complaint.status == "open").count()
+    escalated_complaints = db.query(Complaint).filter(Complaint.escalation_level > 0, Complaint.status == "open").count()
+    resolved_complaints = db.query(Complaint).filter(Complaint.status == "resolved").count()
+
+    from backend.database import DATABASE_URL
+    is_sqlite = DATABASE_URL.startswith("sqlite")
+    
     return {
         "status": "CampusResolve agent running",
+        "database": {
+            "type": "sqlite" if is_sqlite else "postgresql",
+            "persistent": not is_sqlite or "PERSISTENT" in os.getenv("RENDER_DISKS", ""),
+            "total_complaints": total_complaints,
+            "open_complaints": open_complaints,
+            "escalated_complaints": escalated_complaints,
+            "resolved_complaints": resolved_complaints,
+        },
+        "time_scale": float(os.getenv("DEBUG_TIME_SCALE", "1")),
         "email_configured": bool(resend_key or brevo_key or (smtp_user and smtp_pass)),
         "email_mode": email_mode,
         "smtp_configured": bool(smtp_user and smtp_pass),
@@ -431,6 +456,7 @@ def create_complaint(payload: ComplaintCreate, background_tasks: BackgroundTasks
         urgency=urgency,
         status="open",
         assigned_authority=assigned_authority,
+        initial_authority=assigned_authority,
         escalation_level=0,
         no_auto_escalation=no_auto_escalation,
         created_at=created_at,
@@ -495,21 +521,28 @@ def list_complaints(
     assigned_authority: Optional[str] = Query(None, description="Filter complaints for a specific authority role"),
     include_harassment: bool = Query(False, description="Whether to include protected harassment records"),
     status: Optional[str] = Query(None),
+    escalated_only: bool = Query(False, description="Whether to return only escalated complaints"),
     db: Session = Depends(get_db)
 ):
     """
     List complaints with role-based authority isolation.
-    If assigned_authority is specified, returns only complaints assigned to that authority.
+    Returns complaints currently assigned to this authority OR originating from their department.
     """
     query = db.query(Complaint)
     
     if assigned_authority and assigned_authority != "All":
-        query = query.filter(Complaint.assigned_authority == assigned_authority)
+        query = query.filter(
+            (Complaint.assigned_authority == assigned_authority) |
+            (Complaint.initial_authority == assigned_authority)
+        )
     elif not include_harassment:
         query = query.filter(Complaint.category != "harassment")
 
     if status:
         query = query.filter(Complaint.status == status)
+
+    if escalated_only:
+        query = query.filter(Complaint.escalation_level > 0)
 
     return query.order_by(Complaint.created_at.desc()).all()
 

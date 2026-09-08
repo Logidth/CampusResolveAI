@@ -14,7 +14,14 @@ from backend.models import Complaint, ActivityLog, User
 from backend.agent import classify_complaint
 from backend.scheduler import start_scheduler, stop_scheduler, get_sla_duration
 from backend.websocket_manager import manager, set_main_event_loop, broadcast_activity_sync
-from backend.notifier import get_sent_emails, send_new_complaint_email, get_authority_email, AUTHORITY_DIRECTORY
+from backend.notifier import (
+    get_sent_emails,
+    send_new_complaint_email,
+    send_complaint_resolved_email,
+    send_test_email,
+    get_authority_email,
+    AUTHORITY_DIRECTORY
+)
 from backend.auth import (
     verify_password,
     create_session_token,
@@ -387,13 +394,29 @@ class ComplaintResolveRequest(BaseModel):
     remarks: Optional[str] = None
 
 
+class TestEmailRequest(BaseModel):
+    recipient: Optional[str] = None
+
+
+@app.post("/authority/test-email")
+def trigger_test_email(payload: Optional[TestEmailRequest] = None):
+    """
+    Sends a test verification email via SMTP to verify configuration and delivery.
+    Returns status and diagnostic details.
+    """
+    target = payload.recipient if (payload and payload.recipient) else None
+    result = send_test_email(target)
+    return result
+
+
 @app.patch("/complaints/{id}/resolve", response_model=ComplaintOut)
 def resolve_complaint(
     id: int, 
+    background_tasks: BackgroundTasks,
     payload: Optional[ComplaintResolveRequest] = None, 
     db: Session = Depends(get_db)
 ):
-    """Mark a complaint as resolved with optional remarks, record activity log, and broadcast event."""
+    """Mark a complaint as resolved with optional remarks, record activity log, dispatch resolution email, and broadcast event."""
     complaint = db.query(Complaint).filter(Complaint.id == id).first()
     if not complaint:
         raise HTTPException(status_code=404, detail="Complaint not found")
@@ -401,7 +424,8 @@ def resolve_complaint(
     complaint.status = "resolved"
     complaint.resolved_at = datetime.utcnow()
 
-    remarks_str = f" Remarks: {payload.remarks.strip()}" if (payload and payload.remarks and payload.remarks.strip()) else ""
+    remarks_text = payload.remarks.strip() if (payload and payload.remarks and payload.remarks.strip()) else ""
+    remarks_str = f" Remarks: {remarks_text}" if remarks_text else ""
     log_entry = ActivityLog(
         complaint_id=complaint.id,
         action="RESOLVED",
@@ -412,6 +436,16 @@ def resolve_complaint(
     db.commit()
     db.refresh(complaint)
     db.refresh(log_entry)
+
+    # Asynchronously dispatch resolution notice email
+    background_tasks.add_task(
+        send_complaint_resolved_email,
+        complaint_id=complaint.id,
+        complaint_text=complaint.text,
+        category=complaint.category or "general",
+        assigned_authority=complaint.assigned_authority or "Estate Office",
+        remarks=remarks_text or None
+    )
 
     # Broadcast resolution event
     if complaint.category == "harassment":

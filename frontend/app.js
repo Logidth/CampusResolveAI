@@ -778,7 +778,19 @@ if (authLoggedOutView && authLoggedInView) {
     }
   }
 
-  // Resolve Complaint with Official Remarks
+  // Load Sent Authority Emails for Activity Stream
+  async function loadAuthorityEmails() {
+    try {
+      const res = await fetch(`${API_BASE}/authority/emails`);
+      if (!res.ok) return;
+      const emails = await res.json();
+      console.log(`[CampusResolve] Loaded ${emails.length} authority emails.`);
+    } catch (e) {
+      console.warn("Could not load authority emails:", e);
+    }
+  }
+
+  // Resolve Complaint with Official Remarks & Resolution Email Dispatch
   window.resolveComplaint = async function (complaintId) {
     const remarks = prompt(`Mark Complaint #${complaintId} as resolved.\nEnter official resolution remarks / action taken (optional):`, "Issue inspected and resolved by authority.");
     if (remarks === null) return; // User cancelled
@@ -787,13 +799,48 @@ if (authLoggedOutView && authLoggedInView) {
       const res = await fetch(`${API_BASE}/complaints/${complaintId}/resolve`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ remarks: remarks.trim() })
+        body: JSON.stringify({ remarks: remarks.trim() || null })
       });
-      if (!res.ok) throw new Error("Failed to resolve complaint");
+      if (!res.ok) {
+        const errData = await res.json().catch(() => ({}));
+        throw new Error(errData.detail || "Failed to resolve complaint");
+      }
+      alert(`✅ Complaint #${complaintId} marked as RESOLVED!\n\nOfficial resolution notification email has been dispatched.`);
       loadDashboardComplaints();
       loadCounselorComplaints();
+      loadAuthorityEmails();
     } catch (err) {
       alert("Error: " + err.message);
+    }
+  };
+
+  // 1-Click SMTP Test Dispatch
+  window.testSendEmail = async function () {
+    const btn = document.getElementById("testEmailBtn");
+    const origText = btn ? btn.innerHTML : "";
+    if (btn) {
+      btn.disabled = true;
+      btn.innerText = "⏳ Dispatching...";
+    }
+    try {
+      const res = await fetch(`${API_BASE}/authority/test-email`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({})
+      });
+      const data = await res.json();
+      if (data.success) {
+        alert(`✅ Test email delivered successfully to ${data.recipient}!\n\nPlease check your inbox and spam folder.`);
+      } else {
+        alert(`⚠️ Email dispatch failed: ${data.message || 'Check SMTP configuration on Render'}`);
+      }
+    } catch (err) {
+      alert(`⚠️ Connection error sending test email: ${err.message}`);
+    } finally {
+      if (btn) {
+        btn.disabled = false;
+        btn.innerHTML = origText;
+      }
     }
   };
 

@@ -19,7 +19,7 @@ load_dotenv()
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("CampusResolveNotifier")
 
-BASE_URL = os.getenv("BASE_URL", "http://127.0.0.1:8000")
+BASE_URL = (os.getenv("BASE_URL") or os.getenv("RENDER_EXTERNAL_URL") or "https://campusresolveai.onrender.com").rstrip("/")
 
 # Practical Authority Email Directory (Configured with real practical email addresses)
 AUTHORITY_DIRECTORY = {
@@ -87,7 +87,7 @@ def get_authority_email(authority_name: str) -> str:
     return f"{authority_name.lower().replace(' ', '.')}@campus.edu"
 
 
-def _dispatch_smtp(recipient_email: str, subject: str, plain_body: str, html_body: str) -> bool:
+def _dispatch_smtp(recipient_email: str, subject: str, plain_body: str, html_body: str, also_notify_admin: bool = True) -> bool:
     """Helper to dispatch real SMTP emails with STARTTLS (port 587) and SSL (port 465) fallback."""
     smtp_host = os.getenv("SMTP_HOST", "smtp.gmail.com")
     smtp_port = int(os.getenv("SMTP_PORT", "587"))
@@ -102,42 +102,101 @@ def _dispatch_smtp(recipient_email: str, subject: str, plain_body: str, html_bod
         )
         return False
 
-    msg = MIMEMultipart("alternative")
-    msg["From"] = smtp_from
-    msg["To"] = recipient_email
-    msg["Subject"] = subject
-    
-    part1 = MIMEText(plain_body, "plain")
-    part2 = MIMEText(html_body, "html")
-    msg.attach(part1)
-    msg.attach(part2)
+    # Collect recipient list: primary authority plus admin/tester copy if different
+    targets = [recipient_email]
+    if also_notify_admin and smtp_user and smtp_user.lower() != recipient_email.lower():
+        targets.append(smtp_user)
 
-    # Attempt 1: Configured port (usually 587 with STARTTLS)
-    try:
-        if smtp_port == 465:
-            with smtplib.SMTP_SSL(smtp_host, smtp_port, timeout=15) as server:
-                server.login(smtp_user, smtp_pass)
-                server.send_message(msg)
-        else:
-            with smtplib.SMTP(smtp_host, smtp_port, timeout=15) as server:
-                server.starttls()
-                server.login(smtp_user, smtp_pass)
-                server.send_message(msg)
-        logger.info(f"[SMTP SUCCESS] Real email delivered to {recipient_email} via port {smtp_port}")
-        return True
-    except Exception as e1:
-        logger.warning(f"[SMTP RETRY] Port {smtp_port} attempt failed ({e1}). Attempting SSL port 465 fallback...")
+    success_any = False
+    for target in targets:
+        msg = MIMEMultipart("alternative")
+        msg["From"] = smtp_from
+        msg["To"] = target
+        msg["Subject"] = subject
+        
+        part1 = MIMEText(plain_body, "plain")
+        part2 = MIMEText(html_body, "html")
+        msg.attach(part1)
+        msg.attach(part2)
 
-    # Attempt 2: Fallback to SSL on port 465 (handles networks blocking STARTTLS)
-    try:
-        with smtplib.SMTP_SSL(smtp_host, 465, timeout=15) as server:
-            server.login(smtp_user, smtp_pass)
-            server.send_message(msg)
-        logger.info(f"[SMTP SUCCESS] Real email delivered to {recipient_email} via port 465 fallback")
-        return True
-    except Exception as e2:
-        logger.error(f"[SMTP ERROR] Failed to deliver real email to {recipient_email}: {e2}")
-        return False
+        sent = False
+        # Attempt 1: Configured port (usually 587 with STARTTLS)
+        try:
+            if smtp_port == 465:
+                with smtplib.SMTP_SSL(smtp_host, smtp_port, timeout=15) as server:
+                    server.login(smtp_user, smtp_pass)
+                    server.send_message(msg)
+            else:
+                with smtplib.SMTP(smtp_host, smtp_port, timeout=15) as server:
+                    server.starttls()
+                    server.login(smtp_user, smtp_pass)
+                    server.send_message(msg)
+            logger.info(f"[SMTP SUCCESS] Real email delivered to {target} via port {smtp_port}")
+            sent = True
+        except Exception as e1:
+            logger.warning(f"[SMTP RETRY] Port {smtp_port} attempt failed for {target} ({e1}). Attempting SSL port 465 fallback...")
+
+        # Attempt 2: Fallback to SSL on port 465 (handles networks blocking STARTTLS)
+        if not sent:
+            try:
+                with smtplib.SMTP_SSL(smtp_host, 465, timeout=15) as server:
+                    server.login(smtp_user, smtp_pass)
+                    server.send_message(msg)
+                logger.info(f"[SMTP SUCCESS] Real email delivered to {target} via port 465 fallback")
+                sent = True
+            except Exception as e2:
+                logger.error(f"[SMTP ERROR] Failed to deliver real email to {target}: {e2}")
+
+        if sent:
+            success_any = True
+
+    return success_any
+
+
+def send_test_email(recipient: Optional[str] = None) -> Dict[str, Any]:
+    """
+    Sends a test verification email via SMTP to verify configuration and delivery.
+    """
+    smtp_user = os.getenv("SMTP_USER") or os.getenv("SMTP_USERNAME")
+    target = recipient or smtp_user or "dlogidth4@gmail.com"
+    subject = "🧪 [CampusResolve TEST] SMTP Dispatch Verification"
+    timestamp_str = datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S UTC")
+    plain_body = f"""
+CampusResolve System Test
+Timestamp: {timestamp_str}
+Target Recipient: {target}
+SMTP Configured: True
+Base URL: {BASE_URL}
+
+This confirms that your SMTP email engine is fully functional and successfully delivering outbound alerts from CampusResolve.
+"""
+    html_body = f"""
+<!DOCTYPE html>
+<html>
+<head><meta charset="utf-8"></head>
+<body style="font-family: sans-serif; background: #f8fafc; padding: 20px;">
+  <div style="max-width: 500px; margin: 0 auto; background: #fff; border: 1px solid #e2e8f0; border-radius: 8px; padding: 24px;">
+    <h2 style="color: #2563eb; margin-top: 0;">🧪 CampusResolve SMTP Verification</h2>
+    <p>This email verifies that automated outbound notifications are operating correctly from the live portal.</p>
+    <ul>
+      <li><strong>Delivered To:</strong> {target}</li>
+      <li><strong>Timestamp:</strong> {timestamp_str}</li>
+      <li><strong>Portal URL:</strong> <a href="{BASE_URL}/app/dashboard.html">{BASE_URL}/app/dashboard.html</a></li>
+    </ul>
+    <div style="padding: 10px; background: #ecfdf5; border: 1px solid #a7f3d0; border-radius: 4px; color: #047857; font-size: 13px;">
+      ✅ SMTP Handshake and Delivery Verified
+    </div>
+  </div>
+</body>
+</html>
+"""
+    success = _dispatch_smtp(target, subject, plain_body, html_body, also_notify_admin=False)
+    return {
+        "success": success,
+        "recipient": target,
+        "timestamp": timestamp_str,
+        "message": f"Test email {'delivered successfully to ' + target if success else 'failed to deliver. Check server logs.'}"
+    }
 
 
 def send_new_complaint_email(
@@ -510,6 +569,112 @@ CampusResolve Autonomous Grievance Resolution Engine
     # Optional real SMTP sending if environment configured
     _dispatch_smtp(recipient_email, subject, plain_body, html_body)
 
+    return email_record
+
+
+def send_complaint_resolved_email(
+    complaint_id: int,
+    complaint_text: str,
+    category: str,
+    assigned_authority: str,
+    remarks: Optional[str] = None
+) -> Dict[str, Any]:
+    """
+    Constructs and dispatches an official resolution notification email upon complaint resolution.
+    """
+    recipient_email = get_authority_email(assigned_authority)
+    recipient_info = AUTHORITY_DIRECTORY.get(assigned_authority, {})
+    recipient_name = recipient_info.get("name", assigned_authority)
+
+    subject = f"✅ [GRIEVANCE RESOLVED] Complaint #{complaint_id}: {category.upper()} resolved by {assigned_authority}"
+    timestamp_str = datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S UTC")
+    student_track_link = f"{BASE_URL}/app/index.html?track={complaint_id}"
+    remarks_text = remarks.strip() if remarks else "Resolution actions verified and completed by authority."
+
+    plain_body = f"""
+OFFICIAL RESOLUTION NOTICE — CampusResolve Automated Triage Engine
+Complaint #{complaint_id} has been formally MARKED AS RESOLVED.
+
+==================================================
+RESOLUTION DETAILS
+==================================================
+Complaint ID: #{complaint_id}
+Category: {category.upper()}
+Resolving Authority: {assigned_authority} ({recipient_email})
+Resolved At: {timestamp_str}
+Official Remarks / Action Taken:
+"{remarks_text}"
+
+Original Grievance:
+"{complaint_text}"
+
+Tracking Link:
+{student_track_link}
+==================================================
+"""
+
+    html_body = f"""
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <style>
+    body {{ font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; background-color: #f8fafc; margin: 0; padding: 20px; color: #0f172a; }}
+    .container {{ max-width: 600px; margin: 0 auto; background: #ffffff; border: 1px solid #e2e8f0; border-radius: 8px; overflow: hidden; }}
+    .header {{ background: #16a34a; color: #ffffff; padding: 18px 24px; }}
+    .header h1 {{ margin: 0; font-size: 18px; font-weight: 700; }}
+    .content {{ padding: 24px; }}
+    .meta-table {{ width: 100%; border-collapse: collapse; margin-bottom: 20px; }}
+    .meta-table td {{ padding: 8px 10px; border-bottom: 1px solid #f1f5f9; font-size: 14px; }}
+    .meta-table td.label {{ color: #64748b; font-weight: 600; width: 38%; }}
+    .meta-table td.val {{ color: #0f172a; font-weight: 600; }}
+    .remarks-box {{ background: #f0fdf4; border-left: 4px solid #16a34a; padding: 14px; margin: 16px 0; border-radius: 4px; font-size: 14px; color: #166534; }}
+    .footer {{ background: #f8fafc; padding: 14px; text-align: center; font-size: 12px; color: #94a3b8; border-top: 1px solid #e2e8f0; }}
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="header">
+      <h1>✅ Grievance Resolved</h1>
+    </div>
+    <div class="content">
+      <p style="margin-top: 0; font-size: 14px; color: #475569;">
+        Complaint <strong>#{complaint_id}</strong> has been inspected and formally closed.
+      </p>
+      <table class="meta-table">
+        <tr><td class="label">Complaint ID:</td><td class="val">#{complaint_id}</td></tr>
+        <tr><td class="label">Category:</td><td class="val">{category.upper()}</td></tr>
+        <tr><td class="label">Resolved By:</td><td class="val">{assigned_authority}</td></tr>
+        <tr><td class="label">Resolved On:</td><td class="val">{timestamp_str}</td></tr>
+      </table>
+      <div style="font-weight: 600; font-size: 13px; color: #64748b; text-transform: uppercase;">Official Remarks:</div>
+      <div class="remarks-box">"{remarks_text}"</div>
+    </div>
+    <div class="footer">CampusResolve Autonomous Resolution Engine &copy; 2026</div>
+  </div>
+</body>
+</html>
+"""
+
+    email_record = {
+        "id": len(_sent_emails) + 1,
+        "complaint_id": complaint_id,
+        "recipient_name": recipient_name,
+        "recipient_authority": assigned_authority,
+        "recipient_email": recipient_email,
+        "sender": "CampusResolve Alerts <alerts@campusresolve.edu>",
+        "subject": subject,
+        "body": plain_body.strip(),
+        "html_body": html_body.strip(),
+        "portal_link": f"{BASE_URL}/app/dashboard.html?complaint_id={complaint_id}",
+        "track_link": student_track_link,
+        "category": category,
+        "type": "resolved",
+        "timestamp": datetime.utcnow().isoformat()
+    }
+    _sent_emails.insert(0, email_record)
+    logger.info(f"[EMAIL DISPATCH] Sent resolution notice to {assigned_authority} <{recipient_email}> for Complaint #{complaint_id}")
+    _dispatch_smtp(recipient_email, subject, plain_body, html_body)
     return email_record
 
 

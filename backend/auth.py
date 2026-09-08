@@ -8,6 +8,9 @@ import os
 import hashlib
 import secrets
 import logging
+import base64
+import json
+import hmac
 from datetime import datetime, timedelta
 from typing import Optional, Dict, Any, List
 from fastapi import Depends, HTTPException, Header, status
@@ -22,6 +25,7 @@ AUTH_SECRET_SALT = os.getenv("AUTH_SECRET_SALT", "campus-resolve-secure-salt-202
 
 # In-memory active session tokens store: { token: { user_id, username, role, assigned_authority, tier, expires_at } }
 ACTIVE_SESSIONS: Dict[str, Dict[str, Any]] = {}
+REVOKED_TOKENS: set = set()
 
 
 def hash_password(password: str) -> str:
@@ -41,8 +45,20 @@ def verify_password(plain_password: str, hashed_password: str) -> bool:
 
 
 def create_session_token(user: User) -> str:
-    """Create and register an active bearer session token."""
-    token = "cr_token_" + secrets.token_urlsafe(32)
+    """Create and register an active HMAC-signed bearer session token."""
+    exp = int((datetime.utcnow() + timedelta(days=14)).timestamp())
+    payload = {
+        "uid": user.id,
+        "usr": user.username,
+        "rol": user.role,
+        "exp": exp,
+        "rnd": secrets.token_hex(4)
+    }
+    payload_json = json.dumps(payload, separators=(",", ":"))
+    payload_b64 = base64.urlsafe_b64encode(payload_json.encode()).decode().rstrip("=")
+    sig = hmac.new(AUTH_SECRET_SALT.encode(), payload_b64.encode(), hashlib.sha256).hexdigest()[:32]
+    token = f"cr_token_{payload_b64}.{sig}"
+
     ACTIVE_SESSIONS[token] = {
         "user_id": user.id,
         "username": user.username,
@@ -52,13 +68,13 @@ def create_session_token(user: User) -> str:
         "assigned_authority": user.assigned_authority,
         "tier": user.tier,
         "must_change_password": bool(getattr(user, "must_change_password", False)),
-        "expires_at": datetime.utcnow() + timedelta(days=7),
+        "expires_at": datetime.utcnow() + timedelta(days=14),
     }
     return token
 
 
 def get_current_user_from_token(token: str, db: Session) -> Optional[User]:
-    """Resolve User instance from session token."""
+    """Resolve User instance from session token (supports both in-memory cache and signed tokens)."""
     if not token:
         return None
     
@@ -66,15 +82,52 @@ def get_current_user_from_token(token: str, db: Session) -> Optional[User]:
     if token.startswith("Bearer "):
         token = token[7:].strip()
 
+    if token in REVOKED_TOKENS:
+        return None
+
+    # 1. Fast path: check in-memory active sessions
     session_info = ACTIVE_SESSIONS.get(token)
-    if not session_info:
-        return None
-    
-    if datetime.utcnow() > session_info["expires_at"]:
-        ACTIVE_SESSIONS.pop(token, None)
-        return None
-    
-    return db.query(User).filter(User.id == session_info["user_id"]).first()
+    if session_info:
+        if datetime.utcnow() > session_info["expires_at"]:
+            ACTIVE_SESSIONS.pop(token, None)
+            return None
+        return db.query(User).filter(User.id == session_info["user_id"]).first()
+
+    # 2. Resilient path: verify cryptographically signed token (survives container restarts / redeploys)
+    if token.startswith("cr_token_") and "." in token:
+        try:
+            rest = token[9:]
+            payload_b64, sig = rest.split(".", 1)
+            expected_sig = hmac.new(AUTH_SECRET_SALT.encode(), payload_b64.encode(), hashlib.sha256).hexdigest()[:32]
+            if not hmac.compare_digest(sig, expected_sig):
+                return None
+            
+            padded = payload_b64 + "=" * (-len(payload_b64) % 4)
+            data = json.loads(base64.urlsafe_b64decode(padded.encode()).decode())
+            
+            if datetime.utcnow().timestamp() > data.get("exp", 0):
+                return None
+            
+            user = db.query(User).filter(User.id == data.get("uid")).first()
+            if user:
+                # Re-cache into active sessions
+                ACTIVE_SESSIONS[token] = {
+                    "user_id": user.id,
+                    "username": user.username,
+                    "email": user.email,
+                    "full_name": user.full_name,
+                    "role": user.role,
+                    "assigned_authority": user.assigned_authority,
+                    "tier": user.tier,
+                    "must_change_password": bool(getattr(user, "must_change_password", False)),
+                    "expires_at": datetime.utcfromtimestamp(data.get("exp", 0)),
+                }
+                return user
+        except Exception as e:
+            logger.debug(f"Failed to decode signed token: {e}")
+            return None
+
+    return None
 
 
 def get_current_user(

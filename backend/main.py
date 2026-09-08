@@ -451,7 +451,9 @@ def logout(authorization: Optional[str] = Header(None)):
     """Terminate active authority session."""
     if authorization:
         token = authorization[7:].strip() if authorization.startswith("Bearer ") else authorization.strip()
+        from backend.auth import ACTIVE_SESSIONS, REVOKED_TOKENS
         ACTIVE_SESSIONS.pop(token, None)
+        REVOKED_TOKENS.add(token)
     return {"message": "Logged out successfully"}
 
 

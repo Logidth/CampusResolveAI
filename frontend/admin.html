@@ -97,14 +97,33 @@
 
   <main class="container" style="padding-top: 2rem; padding-bottom: 3rem;">
 
-    <!-- Access Denied Alert (if unauthorized) -->
-    <div id="adminAccessDeniedAlert" style="display: none; background: #fef2f2; border: 1px solid #fecaca; border-radius: var(--radius-md); padding: 2rem; text-align: center; max-width: 540px; margin: 3rem auto;">
-      <div style="font-size: 3rem; margin-bottom: 0.5rem;">🔒</div>
-      <h2 style="color: #dc2626; font-weight: 700; margin-bottom: 0.5rem;">Administrator Privileges Required</h2>
-      <p style="color: #475569; font-size: 0.9rem; margin-bottom: 1.5rem;">
-        This portal is strictly reserved for the Central Institutional Administrator (<code>logi</code>). Please sign in with administrator credentials to manage authority accounts.
+    <!-- Access Denied / Admin Login Card -->
+    <div id="adminAccessDeniedAlert" style="display: none; background: var(--bg-card); border: 1px solid var(--border-color); border-radius: var(--radius-lg); padding: 2.5rem; text-align: center; max-width: 480px; margin: 3rem auto; box-shadow: var(--shadow-md);">
+      <div style="font-size: 2.75rem; margin-bottom: 0.5rem;">🔒</div>
+      <h2 style="color: var(--text-main); font-weight: 700; margin-bottom: 0.35rem;">Central Administrator Sign In</h2>
+      <p style="color: var(--text-muted); font-size: 0.875rem; margin-bottom: 1.5rem;">
+        Sign in with administrator credentials (<code>logi</code>) to manage university authority accounts and security credentials.
       </p>
-      <a href="dashboard.html" class="btn btn-primary">Go to Authority Sign In</a>
+
+      <div id="adminInlineLoginError" style="display: none; background: #fef2f2; border: 1px solid #fecaca; color: #dc2626; padding: 0.65rem 0.85rem; border-radius: var(--radius-sm); font-size: 0.825rem; margin-bottom: 1rem; text-align: left;"></div>
+
+      <form id="adminInlineLoginForm" style="text-align: left;">
+        <div class="form-group" style="margin-bottom: 1rem;">
+          <label for="adminInlineUsername" style="display: block; font-weight: 600; font-size: 0.85rem; margin-bottom: 0.35rem; color: var(--text-main);">Username</label>
+          <input type="text" id="adminInlineUsername" class="form-control" placeholder="logi" value="logi" required style="width: 100%;">
+        </div>
+        <div class="form-group" style="margin-bottom: 1.25rem;">
+          <label for="adminInlinePassword" style="display: block; font-weight: 600; font-size: 0.85rem; margin-bottom: 0.35rem; color: var(--text-main);">Password</label>
+          <input type="password" id="adminInlinePassword" class="form-control" placeholder="Enter administrator password" required style="width: 100%;">
+        </div>
+        <button type="submit" id="adminInlineLoginBtn" class="btn btn-primary btn-full" style="width: 100%; padding: 0.75rem; font-weight: 600;">
+          🔐 Sign In as Administrator
+        </button>
+      </form>
+
+      <div style="margin-top: 1.5rem; padding-top: 1rem; border-top: 1px solid var(--border-color); font-size: 0.8rem; color: var(--text-muted);">
+        Authority official? <a href="dashboard.html" style="color: var(--primary); font-weight: 600; text-decoration: none;">Go to Authority Dashboard</a>
+      </div>
     </div>
 
     <!-- Authenticated Admin Content View -->

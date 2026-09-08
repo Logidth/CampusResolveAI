@@ -1290,10 +1290,58 @@ if (authLoggedOutView && authLoggedInView) {
 const adminUsersTableBody = document.getElementById("adminUsersTableBody");
 if (adminUsersTableBody) {
   const currentAdminUser = getAuthUser();
+  const currentToken = getAuthToken();
   const deniedBox = document.getElementById("adminAccessDeniedAlert");
   const contentBox = document.getElementById("adminMainContent");
 
-  if (!currentAdminUser || currentAdminUser.role !== "Admin") {
+  const inlineLoginForm = document.getElementById("adminInlineLoginForm");
+  const inlineLoginErr = document.getElementById("adminInlineLoginError");
+  const inlineLoginBtn = document.getElementById("adminInlineLoginBtn");
+
+  inlineLoginForm?.addEventListener("submit", async (e) => {
+    e.preventDefault();
+    if (inlineLoginErr) inlineLoginErr.style.display = "none";
+    if (inlineLoginBtn) {
+      inlineLoginBtn.disabled = true;
+      inlineLoginBtn.innerText = "Authenticating...";
+    }
+
+    const username = document.getElementById("adminInlineUsername").value.trim();
+    const password = document.getElementById("adminInlinePassword").value.trim();
+
+    try {
+      const res = await fetch(`${API_BASE}/auth/login`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ username, password })
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.detail || "Authentication failed. Please check credentials.");
+
+      if (data.user.role !== "Admin") {
+        throw new Error("Access forbidden: Central Administrator role required (logi).");
+      }
+
+      setAuthSession(data.access_token, data.user);
+      if (deniedBox) deniedBox.style.display = "none";
+      if (contentBox) contentBox.style.display = "block";
+      initAdminConsole();
+    } catch (err) {
+      if (inlineLoginErr) {
+        inlineLoginErr.innerText = err.message;
+        inlineLoginErr.style.display = "block";
+      } else {
+        alert(err.message);
+      }
+    } finally {
+      if (inlineLoginBtn) {
+        inlineLoginBtn.disabled = false;
+        inlineLoginBtn.innerText = "🔐 Sign In as Administrator";
+      }
+    }
+  });
+
+  if (!currentAdminUser || currentAdminUser.role !== "Admin" || !currentToken) {
     if (deniedBox) deniedBox.style.display = "block";
     if (contentBox) contentBox.style.display = "none";
   } else {
@@ -1450,9 +1498,27 @@ if (adminUsersTableBody) {
 
   async function loadAdminUsers() {
     try {
+      const token = getAuthToken();
+      if (!token) {
+        clearAuthSession();
+        if (deniedBox) deniedBox.style.display = "block";
+        if (contentBox) contentBox.style.display = "none";
+        return;
+      }
       const res = await fetch(`${API_BASE}/admin/users`, {
-        headers: { "Authorization": `Bearer ${getAuthToken()}` }
+        headers: { "Authorization": `Bearer ${token}` }
       });
+      if (res.status === 401 || res.status === 403) {
+        clearAuthSession();
+        if (deniedBox) deniedBox.style.display = "block";
+        if (contentBox) contentBox.style.display = "none";
+        const inlineErr = document.getElementById("adminInlineLoginError");
+        if (inlineErr) {
+          inlineErr.innerText = "Session expired or unauthorized. Please sign in with administrator credentials.";
+          inlineErr.style.display = "block";
+        }
+        return;
+      }
       if (!res.ok) throw new Error("Failed to load authority directory");
       const users = await res.json();
 

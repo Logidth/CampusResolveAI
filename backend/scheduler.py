@@ -47,11 +47,11 @@ def get_sla_duration(urgency: str) -> timedelta:
     If DEBUG_TIME_SCALE=3600, 1 real second = 1 simulated hour.
     """
     try:
-        scale = float(os.getenv("DEBUG_TIME_SCALE", "1"))
+        scale = float(os.getenv("DEBUG_TIME_SCALE", "720"))
         if scale <= 0:
-            scale = 1.0
+            scale = 720.0
     except ValueError:
-        scale = 1.0
+        scale = 720.0
 
     nominal_hours = NOMINAL_SLA_HOURS.get(urgency.lower() if urgency else "medium", 48)
     total_seconds = (nominal_hours * 3600.0) / scale
@@ -93,13 +93,23 @@ def check_and_escalate_grievances(db: Session = None):
 
     try:
         now = datetime.utcnow()
-        overdue_complaints = db.query(Complaint).filter(
+        candidates = db.query(Complaint).filter(
             Complaint.status == "open",
             Complaint.no_auto_escalation.is_(False),
-            Complaint.category != "harassment",
-            Complaint.sla_deadline.isnot(None),
-            Complaint.sla_deadline < now
+            Complaint.category != "harassment"
         ).all()
+
+        overdue_complaints = []
+        for c in candidates:
+            effective_duration = get_sla_duration(c.urgency)
+            is_overdue = False
+            if c.sla_deadline and c.sla_deadline < now:
+                is_overdue = True
+            elif c.created_at and (c.created_at + effective_duration) < now:
+                is_overdue = True
+            
+            if is_overdue:
+                overdue_complaints.append(c)
 
         for c in overdue_complaints:
             old_authority = c.assigned_authority or "Unassigned"

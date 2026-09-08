@@ -248,7 +248,7 @@ def health_check(db: Session = Depends(get_db)):
             "escalated_complaints": escalated_complaints,
             "resolved_complaints": resolved_complaints,
         },
-        "time_scale": float(os.getenv("DEBUG_TIME_SCALE", "1")),
+        "time_scale": float(os.getenv("DEBUG_TIME_SCALE", "720")),
         "email_configured": bool(resend_key or brevo_key or (smtp_user and smtp_pass)),
         "email_mode": email_mode,
         "smtp_configured": bool(smtp_user and smtp_pass),

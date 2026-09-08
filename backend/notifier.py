@@ -134,7 +134,8 @@ def _dispatch_smtp(recipient_email: str, subject: str, plain_body: str, html_bod
                     data=payload,
                     headers={
                         "Authorization": f"Bearer {resend_api_key}",
-                        "Content-Type": "application/json"
+                        "Content-Type": "application/json",
+                        "User-Agent": "CampusResolve/1.0"
                     }
                 )
                 with urllib.request.urlopen(req, timeout=15) as resp:

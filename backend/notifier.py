@@ -119,6 +119,7 @@ def _dispatch_smtp(recipient_email: str, subject: str, plain_body: str, html_bod
     if resend_api_key:
         resend_from = (os.getenv("RESEND_FROM") or "CampusResolve <onboarding@resend.dev>").strip()
         success_any = False
+        resend_errors = []
         for target in targets:
             try:
                 payload = json.dumps({
@@ -141,10 +142,19 @@ def _dispatch_smtp(recipient_email: str, subject: str, plain_body: str, html_bod
                         logger.info(f"[RESEND HTTPS SUCCESS] Real email delivered to {target} via Resend API (port 443)")
                         success_any = True
             except Exception as ex:
-                logger.error(f"[RESEND ERROR] Failed to send to {target}: {ex}")
-                _last_smtp_error = f"Resend API error: {ex}"
+                err_detail = str(ex)
+                if hasattr(ex, "read"):
+                    try:
+                        body_txt = ex.read().decode("utf-8", errors="replace")
+                        err_detail += f" - {body_txt}"
+                    except Exception:
+                        pass
+                logger.error(f"[RESEND ERROR] Failed to send to {target}: {err_detail}")
+                resend_errors.append(f"{target}: {err_detail}")
         if success_any:
             return True
+        _last_smtp_error = "Resend API error: " + " | ".join(resend_errors)
+        return False
 
     # PATH B: Brevo HTTPS REST API (Port 443)
     if brevo_api_key:

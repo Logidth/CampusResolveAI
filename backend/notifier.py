@@ -10,6 +10,7 @@ import smtplib
 import json
 import urllib.request
 import urllib.error
+import httpx
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 from datetime import datetime
@@ -122,36 +123,31 @@ def _dispatch_smtp(recipient_email: str, subject: str, plain_body: str, html_bod
         resend_errors = []
         for target in targets:
             try:
-                payload = json.dumps({
-                    "from": resend_from,
-                    "to": [target],
-                    "subject": subject,
-                    "html": html_body,
-                    "text": plain_body
-                }).encode("utf-8")
-                req = urllib.request.Request(
+                resp = httpx.post(
                     "https://api.resend.com/emails",
-                    data=payload,
+                    json={
+                        "from": resend_from,
+                        "to": [target],
+                        "subject": subject,
+                        "html": html_body,
+                        "text": plain_body
+                    },
                     headers={
                         "Authorization": f"Bearer {resend_api_key}",
-                        "Content-Type": "application/json",
-                        "User-Agent": "CampusResolve/1.0"
-                    }
+                        "Content-Type": "application/json"
+                    },
+                    timeout=15.0
                 )
-                with urllib.request.urlopen(req, timeout=15) as resp:
-                    if resp.status in (200, 201):
-                        logger.info(f"[RESEND HTTPS SUCCESS] Real email delivered to {target} via Resend API (port 443)")
-                        success_any = True
+                if resp.status_code in (200, 201):
+                    logger.info(f"[RESEND HTTPS SUCCESS] Real email delivered to {target} via Resend API (port 443)")
+                    success_any = True
+                else:
+                    err_detail = f"Status {resp.status_code}: {resp.text}"
+                    logger.error(f"[RESEND ERROR] Failed to send to {target}: {err_detail}")
+                    resend_errors.append(f"{target}: {err_detail}")
             except Exception as ex:
-                err_detail = str(ex)
-                if hasattr(ex, "read"):
-                    try:
-                        body_txt = ex.read().decode("utf-8", errors="replace")
-                        err_detail += f" - {body_txt}"
-                    except Exception:
-                        pass
-                logger.error(f"[RESEND ERROR] Failed to send to {target}: {err_detail}")
-                resend_errors.append(f"{target}: {err_detail}")
+                logger.error(f"[RESEND ERROR] Failed to send to {target}: {ex}")
+                resend_errors.append(f"{target}: {ex}")
         if success_any:
             return True
         _last_smtp_error = "Resend API error: " + " | ".join(resend_errors)
@@ -160,32 +156,38 @@ def _dispatch_smtp(recipient_email: str, subject: str, plain_body: str, html_bod
     # PATH B: Brevo HTTPS REST API (Port 443)
     if brevo_api_key:
         success_any = False
+        brevo_errors = []
         for target in targets:
             try:
-                payload = json.dumps({
-                    "sender": {"name": "CampusResolve", "email": smtp_from or "alerts@campusresolve.edu"},
-                    "to": [{"email": target}],
-                    "subject": subject,
-                    "htmlContent": html_body,
-                    "textContent": plain_body
-                }).encode("utf-8")
-                req = urllib.request.Request(
+                resp = httpx.post(
                     "https://api.brevo.com/v3/smtp/email",
-                    data=payload,
+                    json={
+                        "sender": {"name": "CampusResolve", "email": smtp_from or "alerts@campusresolve.edu"},
+                        "to": [{"email": target}],
+                        "subject": subject,
+                        "htmlContent": html_body,
+                        "textContent": plain_body
+                    },
                     headers={
                         "api-key": brevo_api_key,
                         "Content-Type": "application/json"
-                    }
+                    },
+                    timeout=15.0
                 )
-                with urllib.request.urlopen(req, timeout=15) as resp:
-                    if resp.status in (200, 201):
-                        logger.info(f"[BREVO HTTPS SUCCESS] Real email delivered to {target} via Brevo API (port 443)")
-                        success_any = True
+                if resp.status_code in (200, 201):
+                    logger.info(f"[BREVO HTTPS SUCCESS] Real email delivered to {target} via Brevo API (port 443)")
+                    success_any = True
+                else:
+                    err_detail = f"Status {resp.status_code}: {resp.text}"
+                    logger.error(f"[BREVO ERROR] Failed to send to {target}: {err_detail}")
+                    brevo_errors.append(f"{target}: {err_detail}")
             except Exception as ex:
                 logger.error(f"[BREVO ERROR] Failed to send to {target}: {ex}")
-                _last_smtp_error = f"Brevo API error: {ex}"
+                brevo_errors.append(f"{target}: {ex}")
         if success_any:
             return True
+        _last_smtp_error = "Brevo API error: " + " | ".join(brevo_errors)
+        return False
 
     # PATH C: Standard SMTP (port 465 SSL / 587 STARTTLS)
     if not smtp_user or not smtp_pass:

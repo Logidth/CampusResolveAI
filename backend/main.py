@@ -1,6 +1,6 @@
 import os
 import asyncio
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import List, Optional, Dict, Any
 from contextlib import asynccontextmanager
 from fastapi import FastAPI, Depends, HTTPException, Query, WebSocket, WebSocketDisconnect, Header, BackgroundTasks
@@ -12,7 +12,7 @@ from sqlalchemy.orm import Session
 from backend.database import engine, Base, get_db
 from backend.models import Complaint, ActivityLog, User
 from backend.agent import classify_complaint
-from backend.scheduler import start_scheduler, stop_scheduler, get_sla_duration
+from backend.scheduler import start_scheduler, stop_scheduler, get_sla_duration, check_and_escalate_grievances
 from backend.websocket_manager import manager, set_main_event_loop, broadcast_activity_sync
 from backend.notifier import (
     get_sent_emails,
@@ -414,6 +414,51 @@ def trigger_test_email(payload: Optional[TestEmailRequest] = None):
     target = payload.recipient if (payload and payload.recipient) else None
     result = send_test_email(target)
     return result
+
+
+@app.post("/complaints/{id}/simulate-breach")
+def simulate_sla_breach(id: int, db: Session = Depends(get_db)):
+    """
+    Simulates an SLA timeout breach on a specific complaint and executes hierarchical
+    escalation immediately, dispatching an automated alert email to the higher authority tier.
+    """
+    complaint = db.query(Complaint).filter(Complaint.id == id).first()
+    if not complaint:
+        raise HTTPException(status_code=404, detail="Complaint not found")
+    if complaint.status != "open":
+        raise HTTPException(status_code=400, detail="Cannot escalate a closed or resolved complaint")
+    if complaint.no_auto_escalation or complaint.category == "harassment":
+        raise HTTPException(status_code=400, detail="This complaint is confidential and protected against automated escalation")
+
+    # Force SLA deadline into the past
+    complaint.sla_deadline = datetime.utcnow() - timedelta(minutes=5)
+    db.commit()
+
+    # Trigger escalation engine
+    check_and_escalate_grievances(db)
+    db.refresh(complaint)
+
+    assigned_email = get_authority_email(complaint.assigned_authority)
+    return {
+        "complaint_id": complaint.id,
+        "escalation_level": complaint.escalation_level,
+        "assigned_authority": complaint.assigned_authority,
+        "assigned_email": assigned_email,
+        "status": complaint.status,
+        "sla_deadline": complaint.sla_deadline.isoformat(),
+        "message": f"Complaint #{complaint.id} escalated to {complaint.assigned_authority} ({assigned_email}) at Level {complaint.escalation_level}. Notification email dispatched!"
+    }
+
+
+@app.post("/admin/escalate-check")
+def trigger_escalation_check(db: Session = Depends(get_db)):
+    """Manually trigger an SLA overdue inspection and hierarchical escalation scan."""
+    processed = check_and_escalate_grievances(db)
+    return {
+        "status": "success",
+        "processed_count": len(processed) if processed else 0,
+        "timestamp": datetime.utcnow().isoformat()
+    }
 
 
 @app.patch("/complaints/{id}/resolve", response_model=ComplaintOut)

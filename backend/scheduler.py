@@ -159,9 +159,11 @@ def check_and_escalate_grievances(db: Session = None):
         if overdue_complaints:
             db.commit()
             logger.info(f"Successfully processed {len(overdue_complaints)} escalated complaints with email notifications.")
+        return overdue_complaints
     except Exception as e:
         logger.error(f"Error during SLA escalation check: {e}")
         db.rollback()
+        return []
     finally:
         if close_db:
             db.close()

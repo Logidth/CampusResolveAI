@@ -706,10 +706,11 @@ if (authLoggedOutView && authLoggedInView) {
           <td>${getEscalationBadge(c.escalation_level)}</td>
           <td>${getStatusBadge(c.status)}</td>
           <td><span style="font-size: 0.8rem; color: var(--text-muted);">${formatDate(c.sla_deadline)}</span></td>
-          <td style="text-align: right;">
+          <td style="text-align: right; white-space: nowrap;">
             ${
               c.status !== "resolved"
-                ? `<button onclick="resolveComplaint(${c.id})" class="btn btn-primary btn-sm">Resolve</button>`
+                ? `<button onclick="resolveComplaint(${c.id})" class="btn btn-primary btn-sm">Resolve</button>
+                   ${!c.no_auto_escalation ? `<button onclick="simulateBreach(${c.id})" class="btn btn-sm" title="Simulate SLA breach to immediately escalate to higher authority tier" style="margin-left: 4px; background: #fee2e2; color: #b91c1c; border: 1px solid #fca5a5;">⚡ Escalate</button>` : ''}`
                 : `<span style="color: var(--success); font-size: 0.8rem; font-weight: 600;">✓ Resolved</span>`
             }
           </td>
@@ -841,6 +842,48 @@ if (authLoggedOutView && authLoggedInView) {
         btn.disabled = false;
         btn.innerHTML = origText;
       }
+    }
+  };
+
+  // Simulate SLA Breach & Autonomous Tier Escalation
+  window.simulateBreach = async function (complaintId) {
+    if (!confirm(`Simulate SLA Breach for Complaint #${complaintId}?\n\nThis will immediately force an SLA timeout, execute hierarchical escalation to the next authority tier, and dispatch a real alert email to their inbox.`)) {
+      return;
+    }
+
+    try {
+      const res = await fetch(`${API_BASE}/complaints/${complaintId}/simulate-breach`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" }
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        throw new Error(data.detail || "Failed to escalate complaint");
+      }
+      alert(`⚡ ESCALATION SUCCESSFUL!\n\n` +
+            `Ticket #${data.complaint_id} escalated to Level ${data.escalation_level}!\n` +
+            `New Authority: ${data.assigned_authority}\n` +
+            `Recipient: ${data.assigned_email}\n\n` +
+            `Real escalation email has been dispatched via Brevo.`);
+      loadDashboardComplaints();
+      loadAuthorityEmails();
+      loadInitialTerminalLogs();
+    } catch (err) {
+      alert("Escalation Error: " + err.message);
+    }
+  };
+
+  // On-demand SLA Check Scan
+  window.triggerSlaScan = async function () {
+    try {
+      const res = await fetch(`${API_BASE}/admin/escalate-check`, { method: "POST" });
+      const data = await res.json();
+      alert(`⚡ Escalation scan completed!\nProcessed ${data.processed_count} overdue complaints.`);
+      loadDashboardComplaints();
+      loadInitialTerminalLogs();
+      loadAuthorityEmails();
+    } catch (err) {
+      alert("Error scanning escalations: " + err.message);
     }
   };
 

@@ -128,36 +128,29 @@ def _dispatch_smtp(recipient_email: str, subject: str, plain_body: str, html_bod
         msg.attach(part1)
         msg.attach(part2)
 
-        sent = False
-        e1_err = None
-        # Attempt 1: Configured port (usually 587 with STARTTLS)
+        # Attempt 1: Port 465 with SSL (direct SMTPS - standard & reliable for cloud hosts like Render)
         try:
-            if smtp_port == 465:
-                with smtplib.SMTP_SSL(smtp_host, smtp_port, timeout=25) as server:
-                    server.login(smtp_user, smtp_pass)
-                    server.send_message(msg)
-            else:
-                with smtplib.SMTP(smtp_host, smtp_port, timeout=25) as server:
-                    server.starttls()
-                    server.login(smtp_user, smtp_pass)
-                    server.send_message(msg)
-            logger.info(f"[SMTP SUCCESS] Real email delivered to {target} via port {smtp_port}")
+            with smtplib.SMTP_SSL(smtp_host, 465, timeout=12) as server:
+                server.login(smtp_user, smtp_pass)
+                server.send_message(msg)
+            logger.info(f"[SMTP SUCCESS] Real email delivered to {target} via SSL port 465")
             sent = True
         except Exception as e1:
             e1_err = e1
-            logger.warning(f"[SMTP RETRY] Port {smtp_port} attempt failed for {target} ({e1}). Attempting SSL port 465 fallback...")
+            logger.warning(f"[SMTP RETRY] SSL port 465 attempt failed for {target} ({e1}). Attempting port 587 STARTTLS fallback...")
 
-        # Attempt 2: Fallback to SSL on port 465 (handles networks blocking STARTTLS)
+        # Attempt 2: Fallback to port 587 with STARTTLS
         if not sent:
             try:
-                with smtplib.SMTP_SSL(smtp_host, 465, timeout=25) as server:
+                with smtplib.SMTP(smtp_host, 587, timeout=12) as server:
+                    server.starttls()
                     server.login(smtp_user, smtp_pass)
                     server.send_message(msg)
-                logger.info(f"[SMTP SUCCESS] Real email delivered to {target} via port 465 fallback")
+                logger.info(f"[SMTP SUCCESS] Real email delivered to {target} via port 587")
                 sent = True
             except Exception as e2:
                 logger.error(f"[SMTP ERROR] Failed to deliver real email to {target}: {e2}")
-                _last_smtp_error = f"Port {smtp_port} error: {e1_err} | Port 465 error: {e2}"
+                _last_smtp_error = f"Port 465 error: {e1_err} | Port 587 error: {e2}"
 
         if sent:
             success_any = True

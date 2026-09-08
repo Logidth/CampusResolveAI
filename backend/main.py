@@ -1,9 +1,10 @@
 import os
+import re
 import asyncio
 from datetime import datetime, timedelta
 from typing import List, Optional, Dict, Any
 from contextlib import asynccontextmanager
-from fastapi import FastAPI, Depends, HTTPException, Query, WebSocket, WebSocketDisconnect, Header, BackgroundTasks
+from fastapi import FastAPI, Depends, HTTPException, Query, WebSocket, WebSocketDisconnect, Header, BackgroundTasks, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
@@ -41,6 +42,24 @@ from backend.auth import (
 Base.metadata.create_all(bind=engine)
 
 
+def extract_student_code(email: Optional[str]) -> str:
+    """
+    Extract student roll identifier from institutional email.
+    Examples:
+      717824v134@kce.ac.in -> v134
+      717824v167@kce.ac.in -> v167
+      v134@kce.ac.in       -> v134
+    """
+    if not email:
+        return "anon"
+    prefix = email.split("@")[0].lower().strip()
+    m = re.search(r"([a-z]+\d+)", prefix)
+    if m:
+        return m.group(1)
+    clean = re.sub(r"[^a-z0-9]", "", prefix)
+    return clean[:10] if clean else "std"
+
+
 # FastAPI Lifespan
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -62,6 +81,25 @@ async def lifespan(app: FastAPI):
         try:
             db.execute(text("ALTER TABLE complaints ADD COLUMN student_name VARCHAR(150)"))
             db.commit()
+        except Exception:
+            db.rollback()
+
+        try:
+            db.execute(text("ALTER TABLE complaints ADD COLUMN ticket_id VARCHAR(50)"))
+            db.commit()
+        except Exception:
+            db.rollback()
+
+        try:
+            missing_tickets = db.query(Complaint).filter(Complaint.ticket_id.is_(None)).all()
+            for comp in missing_tickets:
+                if comp.student_email:
+                    code = extract_student_code(comp.student_email)
+                    comp.ticket_id = f"{code}_t{comp.id}"
+                else:
+                    comp.ticket_id = f"t{comp.id}"
+            if missing_tickets:
+                db.commit()
         except Exception:
             db.rollback()
 
@@ -145,6 +183,7 @@ class ActivityLogOut(BaseModel):
 
 class ComplaintOut(BaseModel):
     id: int
+    ticket_id: Optional[str] = None
     text: str
     category: Optional[str] = None
     urgency: Optional[str] = None
@@ -503,6 +542,19 @@ def create_complaint(payload: ComplaintCreate, background_tasks: BackgroundTasks
     student_email = payload.student_email.strip().lower() if payload.student_email else None
     student_name = payload.student_name.strip() if payload.student_name else None
 
+    # Generate sequential student ticket ID (e.g. v134_t1, v134_t2)
+    ticket_id = None
+    if student_email:
+        student_code = extract_student_code(student_email)
+        existing_count = db.query(Complaint).filter(func.lower(Complaint.student_email) == student_email).count()
+        seq = existing_count + 1
+        ticket_id = f"{student_code}_t{seq}"
+        while db.query(Complaint).filter(Complaint.ticket_id == ticket_id).first():
+            seq += 1
+            ticket_id = f"{student_code}_t{seq}"
+    else:
+        ticket_id = f"anon_t{datetime.utcnow().strftime('%M%S%f')[:8]}"
+
     # 4. Create Complaint Record
     complaint = Complaint(
         text=payload.text,
@@ -511,6 +563,7 @@ def create_complaint(payload: ComplaintCreate, background_tasks: BackgroundTasks
         status="open",
         assigned_authority=assigned_authority,
         initial_authority=assigned_authority,
+        ticket_id=ticket_id,
         student_email=student_email,
         student_name=student_name,
         escalation_level=0,
@@ -583,6 +636,7 @@ def list_complaints(
     """
     List complaints with role-based authority isolation.
     Returns complaints currently assigned to this authority OR originating from their department.
+    Anonymizes student roll numbers and emails so authorities are not exposed to who submitted the complaint.
     """
     query = db.query(Complaint)
     
@@ -600,13 +654,54 @@ def list_complaints(
     if escalated_only:
         query = query.filter(Complaint.escalation_level > 0)
 
-    return query.order_by(Complaint.created_at.desc()).all()
+    complaints = query.order_by(Complaint.created_at.desc()).all()
+    # Mask student roll and identity so authorities are not exposed to student identities
+    return [
+        ComplaintOut(
+            id=c.id,
+            ticket_id=f"TICKET-{c.id}",
+            text=c.text,
+            category=c.category,
+            urgency=c.urgency,
+            status=c.status,
+            assigned_authority=c.assigned_authority,
+            initial_authority=c.initial_authority,
+            student_email=None,
+            student_name=None,
+            escalation_level=c.escalation_level,
+            no_auto_escalation=c.no_auto_escalation,
+            created_at=c.created_at,
+            sla_deadline=c.sla_deadline,
+            resolved_at=c.resolved_at,
+        )
+        for c in complaints
+    ]
 
 
 @app.get("/counselor/complaints", response_model=List[ComplaintOut])
 def list_counselor_complaints(db: Session = Depends(get_db)):
-    """Protected endpoint for Counseling Cell portal to view sensitive harassment records."""
-    return db.query(Complaint).filter(Complaint.category == "harassment").order_by(Complaint.created_at.desc()).all()
+    """Protected endpoint for Counseling Cell portal to view sensitive harassment records (anonymized)."""
+    complaints = db.query(Complaint).filter(Complaint.category == "harassment").order_by(Complaint.created_at.desc()).all()
+    return [
+        ComplaintOut(
+            id=c.id,
+            ticket_id=f"TICKET-{c.id}",
+            text=c.text,
+            category=c.category,
+            urgency=c.urgency,
+            status=c.status,
+            assigned_authority=c.assigned_authority,
+            initial_authority=c.initial_authority,
+            student_email=None,
+            student_name=None,
+            escalation_level=c.escalation_level,
+            no_auto_escalation=c.no_auto_escalation,
+            created_at=c.created_at,
+            sla_deadline=c.sla_deadline,
+            resolved_at=c.resolved_at,
+        )
+        for c in complaints
+    ]
 
 
 @app.get("/student/complaints")
@@ -617,7 +712,7 @@ def get_student_complaints(
 ):
     """
     Retrieve history of grievances submitted by a student, with status, escalation,
-    and resolution remarks from the activity audit log.
+    ticket ID (e.g. v134_t1), and resolution remarks from the activity audit log.
     """
     current_user = get_optional_user(authorization, db)
     target_email = None
@@ -652,6 +747,7 @@ def get_student_complaints(
 
         results.append({
             "id": c.id,
+            "ticket_id": c.ticket_id or f"t{c.id}",
             "text": c.text,
             "category": c.category or "general",
             "urgency": c.urgency or "medium",
@@ -677,13 +773,101 @@ def get_student_complaints(
     }
 
 
-@app.get("/complaints/{id}", response_model=ComplaintDetailOut)
-def get_complaint(id: int, db: Session = Depends(get_db)):
-    """Get a single complaint along with its activity log."""
-    complaint = db.query(Complaint).filter(Complaint.id == id).first()
+@app.get("/complaints/{id_or_ticket}", response_model=ComplaintDetailOut)
+def get_complaint(
+    id_or_ticket: str,
+    authorization: Optional[str] = Header(None),
+    db: Session = Depends(get_db)
+):
+    """
+    Get a single complaint along with its activity log.
+    Enforces privacy and access control:
+    - Students can ONLY inspect grievances filed under their own account (searching other tickets like v167_t1 returns 403 Forbidden).
+    - Authorities cannot see student roll numbers or identity (anonymized to TICKET-#).
+    """
+    clean_ref = id_or_ticket.strip()
+    if clean_ref.isdigit():
+        complaint = db.query(Complaint).filter(Complaint.id == int(clean_ref)).first()
+    else:
+        complaint = db.query(Complaint).filter(Complaint.ticket_id == clean_ref).first()
+
     if not complaint:
-        raise HTTPException(status_code=404, detail="Complaint not found")
-    return complaint
+        raise HTTPException(status_code=404, detail=f"Complaint ticket '{clean_ref}' not found")
+
+    current_user = get_optional_user(authorization, db)
+
+    # 1. Authority or Central Admin
+    if current_user and current_user.role != "Student":
+        return ComplaintDetailOut(
+            id=complaint.id,
+            ticket_id=f"TICKET-{complaint.id}",
+            text=complaint.text,
+            category=complaint.category,
+            urgency=complaint.urgency,
+            status=complaint.status,
+            assigned_authority=complaint.assigned_authority,
+            initial_authority=complaint.initial_authority,
+            student_email=None,
+            student_name=None,
+            escalation_level=complaint.escalation_level,
+            no_auto_escalation=complaint.no_auto_escalation,
+            created_at=complaint.created_at,
+            sla_deadline=complaint.sla_deadline,
+            resolved_at=complaint.resolved_at,
+            activity_logs=complaint.activity_logs
+        )
+
+    # 2. Logged-in Student
+    if current_user and current_user.role == "Student":
+        if not complaint.student_email or complaint.student_email.strip().lower() != current_user.email.strip().lower():
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Access restricted: You can only view grievances filed under your own student account."
+            )
+        return ComplaintDetailOut(
+            id=complaint.id,
+            ticket_id=complaint.ticket_id or f"t{complaint.id}",
+            text=complaint.text,
+            category=complaint.category,
+            urgency=complaint.urgency,
+            status=complaint.status,
+            assigned_authority=complaint.assigned_authority,
+            initial_authority=complaint.initial_authority,
+            student_email=complaint.student_email,
+            student_name=complaint.student_name,
+            escalation_level=complaint.escalation_level,
+            no_auto_escalation=complaint.no_auto_escalation,
+            created_at=complaint.created_at,
+            sla_deadline=complaint.sla_deadline,
+            resolved_at=complaint.resolved_at,
+            activity_logs=complaint.activity_logs
+        )
+
+    # 3. Unauthenticated request
+    if complaint.student_email:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Authentication required: Please sign in with your student credentials to view this grievance."
+        )
+
+    return ComplaintDetailOut(
+        id=complaint.id,
+        ticket_id=complaint.ticket_id or f"TICKET-{complaint.id}",
+        text=complaint.text,
+        category=complaint.category,
+        urgency=complaint.urgency,
+        status=complaint.status,
+        assigned_authority=complaint.assigned_authority,
+        initial_authority=complaint.initial_authority,
+        student_email=None,
+        student_name=None,
+        escalation_level=complaint.escalation_level,
+        no_auto_escalation=complaint.no_auto_escalation,
+        created_at=complaint.created_at,
+        sla_deadline=complaint.sla_deadline,
+        resolved_at=complaint.resolved_at,
+        activity_logs=complaint.activity_logs
+    )
 
 
 class ComplaintResolveRequest(BaseModel):
@@ -807,7 +991,23 @@ def resolve_complaint(
         "assigned_authority": complaint.assigned_authority,
     })
 
-    return complaint
+    return ComplaintOut(
+        id=complaint.id,
+        ticket_id=f"TICKET-{complaint.id}",
+        text=complaint.text,
+        category=complaint.category,
+        urgency=complaint.urgency,
+        status=complaint.status,
+        assigned_authority=complaint.assigned_authority,
+        initial_authority=complaint.initial_authority,
+        student_email=None,
+        student_name=None,
+        escalation_level=complaint.escalation_level,
+        no_auto_escalation=complaint.no_auto_escalation,
+        created_at=complaint.created_at,
+        sla_deadline=complaint.sla_deadline,
+        resolved_at=complaint.resolved_at,
+    )
 
 
 @app.get("/activity-feed", response_model=List[ActivityFeedItem])

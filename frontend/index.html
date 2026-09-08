@@ -175,7 +175,7 @@
             <div class="confirmation-grid">
               <div class="meta-item">
                 <div class="meta-label">Ticket ID</div>
-                <div class="meta-value" style="color: var(--primary);">#<span id="resId"></span></div>
+                <div class="meta-value" style="color: var(--primary); font-family: var(--font-mono); font-weight: 700;"><span id="resId"></span></div>
               </div>
               <div class="meta-item">
                 <div class="meta-label">Category</div>
@@ -194,17 +194,14 @@
                 <div class="meta-value" id="resStatus"></div>
               </div>
               <div class="meta-item">
-                <div class="meta-label">Resolution Target (SLA)</div>
-                <div class="meta-value" id="resSla" style="font-size: 0.8rem;"></div>
+                <div class="meta-label">SLA Target</div>
+                <div class="meta-value" id="resSla"></div>
               </div>
             </div>
 
-            <div style="margin-top: 1rem; display: flex; gap: 0.75rem; flex-wrap: wrap;">
-              <button onclick="switchStudentTab('history')" class="btn btn-sm btn-primary">
-                📋 View in My History
-              </button>
-              <a href="#trackingSection" id="trackComplaintLink" class="btn btn-sm btn-outline">
-                🔍 Track Live Timeline
+            <div class="confirmation-footer">
+              <a href="#trackingSection" id="trackComplaintLink" class="btn btn-outline btn-sm">
+                Track this grievance &rarr;
               </a>
             </div>
           </div>
@@ -253,7 +250,7 @@
             <table class="data-table" id="studentHistoryTable">
               <thead>
                 <tr>
-                  <th style="width: 70px;">ID</th>
+                  <th style="width: 110px;">Ticket ID</th>
                   <th>Grievance Summary</th>
                   <th>Category</th>
                   <th>Priority</th>
@@ -281,7 +278,7 @@
         <section class="card" id="trackingSection">
           <div class="card-header">
             <h2 class="card-title">Track Grievance Audit Trail</h2>
-            <p class="card-subtitle">Enter any Ticket ID to inspect its full chronological activity log and escalation trail.</p>
+            <p class="card-subtitle">Enter your Ticket ID (e.g. <code>v134_t1</code>) to inspect its full chronological activity log and escalation trail.</p>
           </div>
 
           <form id="trackForm">
@@ -289,11 +286,10 @@
               <div class="form-group" style="flex: 1; min-width: 200px; margin-bottom: 0;">
                 <label for="trackIdInput">Complaint Ticket ID</label>
                 <input 
-                  type="number" 
+                  type="text" 
                   id="trackIdInput" 
                   class="form-control" 
-                  placeholder="e.g. 1" 
-                  min="1" 
+                  placeholder="e.g. v134_t1" 
                   required>
               </div>
               <button type="submit" id="trackBtn" class="btn btn-outline" style="height: 42px;">
@@ -301,6 +297,14 @@
               </button>
             </div>
           </form>
+
+          <!-- Track Error Alert Box (e.g. Access Restricted) -->
+          <div id="trackErrorBox" style="display: none; background: #fef2f2; border: 1px solid #fecaca; color: #b91c1c; border-radius: var(--radius-md); padding: 1.25rem; margin-top: 1.5rem; text-align: left;">
+            <div style="font-weight: 700; margin-bottom: 0.25rem; display: flex; align-items: center; gap: 0.4rem;">
+              <span>🔒</span> <span id="trackErrorTitle">Access Restricted</span>
+            </div>
+            <div id="trackErrorMessage" style="font-size: 0.9rem; color: #7f1d1d;"></div>
+          </div>
 
           <!-- Track Result Box -->
           <div id="trackResultBox" class="track-result">

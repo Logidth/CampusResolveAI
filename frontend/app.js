@@ -305,7 +305,7 @@ window.renderStudentHistoryTable = function () {
     return `
       <tr>
         <td style="font-family: var(--font-mono); font-weight: 700; color: var(--primary);">
-          #${c.id}
+          ${c.ticket_id || ('#' + c.id)}
         </td>
         <td style="max-width: 250px; font-size: 0.88rem;">
           <div style="font-weight: 500; color: var(--text-main); margin-bottom: 0.25rem;">
@@ -332,7 +332,7 @@ window.renderStudentHistoryTable = function () {
           ${isResolved ? (c.resolved_at ? formatDate(c.resolved_at) : 'Resolved') : (c.sla_deadline ? formatDate(c.sla_deadline) : 'Standard SLA')}
         </td>
         <td style="text-align: right; white-space: nowrap;">
-          <button onclick="viewStudentComplaintDetails(${c.id})" class="btn btn-outline btn-sm" title="View live timeline and audit trail">
+          <button onclick="viewStudentComplaintDetails('${c.ticket_id || c.id}')" class="btn btn-outline btn-sm" title="View live timeline and audit trail">
             🔍 Timeline
           </button>
         </td>
@@ -470,7 +470,8 @@ if (complaintForm) {
       const data = await res.json();
 
       // Render Confirmation Details
-      document.getElementById("resId").innerText = data.id;
+      const displayTicket = data.ticket_id || ('#' + data.id);
+      document.getElementById("resId").innerText = displayTicket;
       document.getElementById("resCategory").innerText = (data.category || "General").toUpperCase();
       document.getElementById("resUrgency").innerHTML = getUrgencyBadge(data.urgency);
       document.getElementById("resAuthority").innerText = data.assigned_authority || "Student Affairs";
@@ -486,8 +487,8 @@ if (complaintForm) {
           event.preventDefault();
           switchStudentTab("search");
           if (trackIdInput) {
-            trackIdInput.value = data.id;
-            loadComplaintDetails(data.id);
+            trackIdInput.value = data.ticket_id || data.id;
+            loadComplaintDetails(data.ticket_id || data.id);
             document.getElementById("trackingSection")?.scrollIntoView({ behavior: "smooth" });
           }
         };
@@ -518,18 +519,42 @@ if (complaintForm) {
 async function loadComplaintDetails(id) {
   if (!id) return;
   const trackBtn = document.getElementById("trackBtn");
+  const trackErrorBox = document.getElementById("trackErrorBox");
+  const trackErrorMessage = document.getElementById("trackErrorMessage");
+  const trackErrorTitle = document.getElementById("trackErrorTitle");
+
   if (trackBtn) trackBtn.disabled = true;
+  if (trackErrorBox) trackErrorBox.style.display = "none";
 
   try {
-    const res = await fetch(`${API_BASE}/complaints/${encodeURIComponent(id)}`);
+    const studentToken = getStudentToken();
+    const authToken = getAuthToken();
+    const activeToken = studentToken || authToken;
+
+    const res = await fetch(`${API_BASE}/complaints/${encodeURIComponent(id)}`, {
+      headers: {
+        ...(activeToken ? { "Authorization": `Bearer ${activeToken}` } : {})
+      }
+    });
+
     if (!res.ok) {
-      if (res.status === 404) throw new Error(`Complaint ID #${id} not found.`);
-      throw new Error("Unable to fetch complaint details.");
+      const errData = await res.json().catch(() => ({}));
+      if (res.status === 403) {
+        throw new Error(errData.detail || "Access restricted: You can only inspect grievances filed under your own student account.");
+      }
+      if (res.status === 401) {
+        throw new Error(errData.detail || "Authentication required: Please sign in with your student credentials to view this grievance.");
+      }
+      if (res.status === 404) {
+        throw new Error(errData.detail || `Ticket '${id}' not found. Please verify your ticket ID.`);
+      }
+      throw new Error(errData.detail || "Unable to fetch complaint details.");
     }
     const data = await res.json();
 
     if (trackResultBox) {
-      document.getElementById("trackComplaintHeading").innerText = `Complaint #${data.id}`;
+      const displayHeading = data.ticket_id || `#${data.id}`;
+      document.getElementById("trackComplaintHeading").innerText = `Complaint Ticket ${displayHeading}`;
       document.getElementById("trackComplaintText").innerText = `"${data.text}"`;
       document.getElementById("trackStatusBadge").innerHTML = getStatusBadge(data.status);
       document.getElementById("trackCategory").innerText = (data.category || "General").toUpperCase();
@@ -558,7 +583,16 @@ async function loadComplaintDetails(id) {
       trackResultBox.style.display = "block";
     }
   } catch (err) {
-    alert(err.message);
+    if (trackResultBox) trackResultBox.style.display = "none";
+    if (trackErrorBox && trackErrorMessage) {
+      trackErrorMessage.innerText = err.message;
+      if (trackErrorTitle) {
+        trackErrorTitle.innerText = err.message.includes("restricted") ? "Access Restricted" : "Search Error";
+      }
+      trackErrorBox.style.display = "block";
+    } else {
+      alert(err.message);
+    }
   } finally {
     if (trackBtn) trackBtn.disabled = false;
   }

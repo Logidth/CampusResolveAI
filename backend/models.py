@@ -14,6 +14,7 @@ class Complaint(Base):
     status = Column(String(50), default="open", nullable=False)
     assigned_authority = Column(String(150), nullable=True)
     initial_authority = Column(String(150), nullable=True)
+    ticket_id = Column(String(50), nullable=True, index=True)
     student_email = Column(String(150), nullable=True, index=True)
     student_name = Column(String(150), nullable=True)
     escalation_level = Column(Integer, default=0, nullable=False)

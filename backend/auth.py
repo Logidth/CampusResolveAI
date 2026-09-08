@@ -119,6 +119,74 @@ def get_optional_user(
     return get_current_user_from_token(authorization, db)
 
 
+def validate_student_email(email: str) -> bool:
+    """Validate that the provided email belongs to the institutional @kce.ac.in domain."""
+    if not email or not isinstance(email, str):
+        return False
+    clean_email = email.strip().lower()
+    return clean_email.endswith("@kce.ac.in") and "@" in clean_email and len(clean_email.split("@")[0]) > 0
+
+
+def authenticate_or_register_student(
+    email: str,
+    password: str,
+    full_name: Optional[str] = None,
+    db: Session = None
+) -> tuple[User, str]:
+    """
+    Authenticate an existing student or auto-register a first-time student with an @kce.ac.in email.
+    Returns (User, session_token).
+    """
+    clean_email = (email or "").strip().lower()
+    if not validate_student_email(clean_email):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Access restricted: Only official college institutional email addresses ending with @kce.ac.in are allowed."
+        )
+
+    if not password or len(password.strip()) < 4:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Password must be at least 4 characters."
+        )
+
+    # Check for existing student account by email and role
+    user = db.query(User).filter(User.email == clean_email, User.role == "Student").first()
+    if user:
+        # Existing student account: verify password
+        if not verify_password(password, user.hashed_password):
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Incorrect password for this student account. Please try again."
+            )
+    else:
+        # First-time student registration
+        prefix = clean_email.split("@")[0]
+        base_username = f"std_{prefix}"
+        existing_username = db.query(User).filter(User.username == base_username).first()
+        if existing_username:
+            base_username = f"std_{prefix}_{secrets.token_hex(2)}"
+
+        display_name = full_name.strip() if (full_name and full_name.strip()) else prefix.upper()
+        user = User(
+            username=base_username,
+            email=clean_email,
+            hashed_password=hash_password(password),
+            full_name=display_name,
+            role="Student",
+            assigned_authority=None,
+            tier="Student",
+            must_change_password=False,
+            created_at=datetime.utcnow()
+        )
+        db.add(user)
+        db.commit()
+        db.refresh(user)
+
+    token = create_session_token(user)
+    return user, token
+
+
 # =====================================================================
 # Authority Accounts Matrix & Database Seeder
 # =====================================================================

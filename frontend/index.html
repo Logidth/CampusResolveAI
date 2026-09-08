@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>CampusResolve — Student Grievance Portal</title>
+  <title>CampusResolve — Student Grievance & Status Portal</title>
   <link rel="stylesheet" href="style.css">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -11,166 +11,349 @@
 </head>
 <body>
 
-  <!-- Minimal Two-Page Header -->
+  <!-- Top Navigation Bar -->
   <header>
     <div class="nav-container">
       <a href="index.html" class="brand">
         <div class="brand-icon">CR</div>
         <div class="brand-title">Campus<span>Resolve</span></div>
       </a>
-      <nav class="nav-links">
+      <nav class="nav-links" style="display: flex; align-items: center; gap: 1rem;">
         <a href="index.html" class="nav-link active">🎓 Student Portal</a>
         <a href="dashboard.html" class="nav-link" id="navAuthorityLink">🏛️ Authority Portal</a>
+
+        <!-- Authenticated Student Pill -->
+        <div id="studentUserPill" class="user-profile-pill" style="display: none;">
+          <div class="user-avatar-circle">🎓</div>
+          <span id="navStudentEmail" style="font-size: 0.82rem; font-weight: 600; font-family: var(--font-mono); color: var(--primary);">student@kce.ac.in</span>
+          <button onclick="handleStudentLogout()" class="btn btn-sm" style="padding: 2px 8px; font-size: 0.75rem; background: #fff; border: 1px solid #cbd5e1; color: #475569;">Logout</button>
+        </div>
+
+        <!-- Student Login Button (when logged out) -->
+        <button id="navStudentLoginBtn" onclick="focusStudentAuth()" class="btn btn-outline btn-sm" style="display: inline-flex;">
+          Student Sign In
+        </button>
       </nav>
     </div>
   </header>
 
-  <!-- Main Content -->
+  <!-- Main Container -->
   <main class="container">
-    <!-- Hero / Intro -->
-    <div class="hero-minimal">
-      <h1>Campus Grievance Portal</h1>
-      <p>Submit your concern below. Our system classifies, assigns, and establishes resolution SLAs automatically.</p>
-    </div>
 
-    <!-- 1. Submit Complaint Card -->
-    <section class="card">
-      <div class="card-header">
-        <h2 class="card-title">Submit a Grievance</h2>
-        <p class="card-subtitle">Explain your issue clearly. State the hostel block, room number, mess dining hall, academic course, or campus facility.</p>
+    <!-- 0. STUDENT AUTHENTICATION CARD (Displayed when logged out) -->
+    <section id="studentAuthCard" class="card" style="max-width: 520px; margin: 2rem auto; border-top: 4px solid var(--primary); box-shadow: var(--shadow-lg);">
+      <div class="card-header" style="text-align: center;">
+        <div style="display: inline-flex; align-items: center; gap: 0.4rem; padding: 0.25rem 0.75rem; background: rgba(37, 99, 235, 0.1); border-radius: 20px; font-size: 0.8rem; font-weight: 600; color: var(--primary); margin-bottom: 0.75rem;">
+          <span>🔒 Institutional Access Only</span>
+        </div>
+        <h2 class="card-title" style="font-size: 1.45rem;">Student Portal Sign In</h2>
+        <p class="card-subtitle" style="font-size: 0.88rem; line-height: 1.4; margin-top: 0.25rem;">
+          Enter your official college email address (<strong style="color: var(--primary);">@kce.ac.in</strong>) to submit grievances, monitor live resolution status, and view your complete tracking history.
+        </p>
       </div>
 
-      <form id="complaintForm">
+      <form id="studentLoginForm" style="margin-top: 1rem;">
         <div class="form-group">
-          <label for="complaintText">Complaint Description</label>
-          <textarea 
-            id="complaintText" 
-            class="form-control" 
-            placeholder="e.g. Water supply stopped in hostel block C room 204 since this morning, or mess dinner food quality was unhygienic, or lab equipment in CS Room 302 not functioning..." 
-            required></textarea>
+          <label for="stdLoginEmail" style="font-size: 0.85rem; font-weight: 600;">Institutional Email Address</label>
+          <div style="position: relative;">
+            <input 
+              type="email" 
+              id="stdLoginEmail" 
+              class="form-control" 
+              placeholder="e.g. 717824v101@kce.ac.in" 
+              pattern="^[a-zA-Z0-9._%+-]+@kce\.ac\.in$" 
+              title="Must be an official @kce.ac.in email address" 
+              required>
+          </div>
+          <span style="font-size: 0.75rem; color: var(--text-muted); display: block; margin-top: 0.25rem;">
+            Only institutional accounts ending with <strong>@kce.ac.in</strong> are permitted.
+          </span>
         </div>
 
-        <button type="submit" id="submitBtn" class="btn btn-primary btn-full">
-          Submit Complaint
+        <div class="form-group">
+          <label for="stdLoginPassword" style="font-size: 0.85rem; font-weight: 600;">Portal Password</label>
+          <input 
+            type="password" 
+            id="stdLoginPassword" 
+            class="form-control" 
+            placeholder="Enter password (min. 4 characters)" 
+            minlength="4" 
+            required>
+        </div>
+
+        <div class="form-group">
+          <label for="stdLoginName" style="font-size: 0.85rem; font-weight: 600;">Student Name / Roll Number (Optional)</label>
+          <input 
+            type="text" 
+            id="stdLoginName" 
+            class="form-control" 
+            placeholder="e.g. S. Logi / 717824V101">
+        </div>
+
+        <div id="stdLoginError" style="display: none; padding: 0.65rem 0.85rem; background: var(--danger-bg); border: 1px solid var(--danger-border); border-radius: var(--radius-sm); color: var(--danger); font-size: 0.85rem; margin-bottom: 1rem;"></div>
+
+        <button type="submit" id="btnStudentLoginSubmit" class="btn btn-primary btn-full" style="height: 42px; font-weight: 600;">
+          🎓 Sign In / Register with @kce.ac.in
         </button>
       </form>
 
-      <!-- Success Confirmation Box -->
-      <div id="confirmationBox" class="confirmation-box">
-        <div class="confirmation-header">
-          <svg width="20" height="20" viewBox="0 0 20 20" fill="currentColor">
-            <path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clip-rule="evenodd" />
-          </svg>
-          Complaint Registered & Routed Successfully
-        </div>
-
-        <div class="confirmation-grid">
-          <div class="meta-item">
-            <div class="meta-label">Ticket ID</div>
-            <div class="meta-value" style="color: var(--primary);">#<span id="resId"></span></div>
-          </div>
-          <div class="meta-item">
-            <div class="meta-label">Category</div>
-            <div class="meta-value" id="resCategory"></div>
-          </div>
-          <div class="meta-item">
-            <div class="meta-label">Urgency Priority</div>
-            <div class="meta-value" id="resUrgency"></div>
-          </div>
-          <div class="meta-item">
-            <div class="meta-label">Assigned Authority</div>
-            <div class="meta-value" id="resAuthority"></div>
-          </div>
-          <div class="meta-item">
-            <div class="meta-label">Current Status</div>
-            <div class="meta-value" id="resStatus"></div>
-          </div>
-          <div class="meta-item">
-            <div class="meta-label">Resolution SLA Target</div>
-            <div class="meta-value" id="resSla" style="font-size: 0.8rem;"></div>
-          </div>
-        </div>
-
-        <a href="#trackingSection" id="trackComplaintLink" class="track-action-link">
-          🔍 Track this complaint & live timeline &rarr;
-        </a>
+      <div style="margin-top: 1.25rem; padding-top: 1rem; border-top: 1px solid var(--border-color); font-size: 0.78rem; color: var(--text-muted); line-height: 1.4; text-align: center;">
+        💡 <strong>First Time?</strong> Your student account is automatically registered on first login with your chosen password.
       </div>
     </section>
 
-    <!-- 2. Track Complaint Card -->
-    <section class="card" id="trackingSection">
-      <div class="card-header">
-        <h2 class="card-title">Track Grievance Status</h2>
-        <p class="card-subtitle">Enter your Ticket ID to check current status, assigned authority, escalation tier, and resolution audit trail.</p>
-      </div>
-
-      <form id="trackForm">
-        <div style="display: flex; gap: 0.75rem; align-items: flex-end; flex-wrap: wrap;">
-          <div class="form-group" style="flex: 1; min-width: 200px; margin-bottom: 0;">
-            <label for="trackIdInput">Complaint Ticket ID</label>
-            <input 
-              type="number" 
-              id="trackIdInput" 
-              class="form-control" 
-              placeholder="e.g. 1" 
-              min="1" 
-              required>
-          </div>
-          <button type="submit" id="trackBtn" class="btn btn-outline" style="height: 42px;">
-            Search Status
+    <!-- 1. STUDENT MAIN APP PORTAL (Displayed when authenticated) -->
+    <div id="studentAppSection" style="display: none;">
+      
+      <!-- Student Banner -->
+      <div class="hero-minimal" style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 1rem; margin-bottom: 1.25rem;">
+        <div>
+          <h1 style="font-size: 1.6rem; font-weight: 700;">Student Grievance Dashboard</h1>
+          <p style="font-size: 0.9rem; color: var(--text-muted); margin-top: 0.2rem;">
+            Logged in as <strong id="studentDisplayName">Student</strong> (<span class="student-badge-kce" id="studentDisplayEmail">717824v101@kce.ac.in</span>)
+          </p>
+        </div>
+        <div style="display: flex; gap: 0.5rem;">
+          <button onclick="refreshStudentHistory()" class="btn btn-outline btn-sm" title="Refresh Grievance Status">
+            🔄 Refresh Status
           </button>
         </div>
-      </form>
-
-      <!-- Track Result Box -->
-      <div id="trackResultBox" class="track-result">
-        <div style="display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid var(--border-color); padding-bottom: 0.75rem; margin-bottom: 1rem;">
-          <h3 style="font-size: 1.1rem; font-weight: 700; color: var(--text-main);" id="trackComplaintHeading">Complaint #--</h3>
-          <div id="trackStatusBadge"></div>
-        </div>
-
-        <p id="trackComplaintText" style="font-style: italic; color: var(--text-main); margin-bottom: 1rem; font-size: 0.95rem; line-height: 1.5;"></p>
-
-        <div class="confirmation-grid">
-          <div class="meta-item">
-            <div class="meta-label">Category</div>
-            <div class="meta-value" id="trackCategory">--</div>
-          </div>
-          <div class="meta-item">
-            <div class="meta-label">Urgency</div>
-            <div class="meta-value" id="trackUrgency">--</div>
-          </div>
-          <div class="meta-item">
-            <div class="meta-label">Assigned Authority</div>
-            <div class="meta-value" id="trackAuthority">--</div>
-          </div>
-          <div class="meta-item">
-            <div class="meta-label">Escalation Tier</div>
-            <div class="meta-value" id="trackEscalation">Level 0</div>
-          </div>
-          <div class="meta-item">
-            <div class="meta-label">SLA Deadline</div>
-            <div class="meta-value" id="trackSla" style="font-size: 0.8rem;">--</div>
-          </div>
-          <div class="meta-item">
-            <div class="meta-label">Resolved At</div>
-            <div class="meta-value" id="trackResolvedAt" style="font-size: 0.8rem;">--</div>
-          </div>
-        </div>
-
-        <h4 style="font-size: 0.9rem; font-weight: 700; margin-top: 1.25rem; margin-bottom: 0.5rem;">Audit Trail & Escalation Log</h4>
-        <ul id="trackTimeline" class="timeline">
-          <!-- Populated by JS -->
-        </ul>
       </div>
-    </section>
+
+      <!-- Navigation Tabs -->
+      <div class="student-tabs">
+        <button id="tabBtnSubmit" onclick="switchStudentTab('submit')" class="student-tab-btn active">
+          📝 Submit Grievance
+        </button>
+        <button id="tabBtnHistory" onclick="switchStudentTab('history')" class="student-tab-btn">
+          📋 My Grievance History (<span id="historyBadgeCount">0</span>)
+        </button>
+        <button id="tabBtnSearch" onclick="switchStudentTab('search')" class="student-tab-btn">
+          🔍 Track by Ticket ID
+        </button>
+      </div>
+
+      <!-- TAB 1: SUBMIT GRIEVANCE -->
+      <div id="tabContentSubmit" class="tab-pane">
+        <section class="card">
+          <div class="card-header">
+            <h2 class="card-title">Submit a New Grievance</h2>
+            <p class="card-subtitle">
+              Your grievance will be automatically classified, assigned to the responsible university authority, and tracked under your verified student profile.
+            </p>
+          </div>
+
+          <form id="complaintForm">
+            <div style="margin-bottom: 1rem; padding: 0.6rem 0.85rem; background: var(--primary-light); border: 1px solid var(--primary-border); border-radius: var(--radius-sm); font-size: 0.82rem; color: var(--primary); display: flex; align-items: center; gap: 0.5rem;">
+              <span>Verified Submitter:</span>
+              <strong id="formStudentBadge" style="font-family: var(--font-mono);">717824v101@kce.ac.in</strong>
+            </div>
+
+            <div class="form-group">
+              <label for="complaintText">Complaint Description</label>
+              <textarea 
+                id="complaintText" 
+                class="form-control" 
+                placeholder="Describe your grievance clearly. Mention the hostel block, room number, mess dining hall, exam subject, fee reference, or campus facility..." 
+                required></textarea>
+            </div>
+
+            <button type="submit" id="submitBtn" class="btn btn-primary btn-full">
+              Submit Grievance
+            </button>
+          </form>
+
+          <!-- Success Confirmation Box -->
+          <div id="confirmationBox" class="confirmation-box">
+            <div class="confirmation-header">
+              <svg width="20" height="20" viewBox="0 0 20 20" fill="currentColor">
+                <path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clip-rule="evenodd" />
+              </svg>
+              Grievance Lodged & Routed Successfully
+            </div>
+
+            <div class="confirmation-grid">
+              <div class="meta-item">
+                <div class="meta-label">Ticket ID</div>
+                <div class="meta-value" style="color: var(--primary);">#<span id="resId"></span></div>
+              </div>
+              <div class="meta-item">
+                <div class="meta-label">Category</div>
+                <div class="meta-value" id="resCategory"></div>
+              </div>
+              <div class="meta-item">
+                <div class="meta-label">Priority</div>
+                <div class="meta-value" id="resUrgency"></div>
+              </div>
+              <div class="meta-item">
+                <div class="meta-label">Assigned Authority</div>
+                <div class="meta-value" id="resAuthority"></div>
+              </div>
+              <div class="meta-item">
+                <div class="meta-label">Current Status</div>
+                <div class="meta-value" id="resStatus"></div>
+              </div>
+              <div class="meta-item">
+                <div class="meta-label">Resolution Target (SLA)</div>
+                <div class="meta-value" id="resSla" style="font-size: 0.8rem;"></div>
+              </div>
+            </div>
+
+            <div style="margin-top: 1rem; display: flex; gap: 0.75rem; flex-wrap: wrap;">
+              <button onclick="switchStudentTab('history')" class="btn btn-sm btn-primary">
+                📋 View in My History
+              </button>
+              <a href="#trackingSection" id="trackComplaintLink" class="btn btn-sm btn-outline">
+                🔍 Track Live Timeline
+              </a>
+            </div>
+          </div>
+        </section>
+      </div>
+
+      <!-- TAB 2: MY GRIEVANCE HISTORY & STATUS TRACKING -->
+      <div id="tabContentHistory" class="tab-pane" style="display: none;">
+        
+        <!-- Summary Stat Cards -->
+        <div class="stats-grid" style="margin-bottom: 1.5rem;">
+          <div class="stat-card">
+            <div class="stat-label">Total Lodged</div>
+            <div id="stdStatTotal" class="stat-value">0</div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-label">Open / In Progress</div>
+            <div id="stdStatOpen" class="stat-value" style="color: var(--primary);">0</div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-label">⚡ Escalated</div>
+            <div id="stdStatEscalated" class="stat-value" style="color: var(--danger);">0</div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-label">✅ Resolved</div>
+            <div id="stdStatResolved" class="stat-value" style="color: var(--success);">0</div>
+          </div>
+        </div>
+
+        <section class="card">
+          <div class="card-header" style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 0.75rem;">
+            <div>
+              <h2 class="card-title">My Grievances History</h2>
+              <p class="card-subtitle">Real-time status, escalation tier, and official resolution remarks for all your submissions.</p>
+            </div>
+            <div style="display: flex; align-items: center; gap: 1rem;">
+              <label style="display: flex; align-items: center; gap: 0.4rem; font-size: 0.85rem; cursor: pointer;">
+                <input type="checkbox" id="stdShowOnlyOpenCheckbox" onchange="renderStudentHistoryTable()">
+                <span>Only show active</span>
+              </label>
+            </div>
+          </div>
+
+          <!-- History Table Container -->
+          <div style="overflow-x: auto;">
+            <table class="data-table" id="studentHistoryTable">
+              <thead>
+                <tr>
+                  <th style="width: 70px;">ID</th>
+                  <th>Grievance Summary</th>
+                  <th>Category</th>
+                  <th>Priority</th>
+                  <th>Assigned Authority</th>
+                  <th>Tier</th>
+                  <th>Status</th>
+                  <th>SLA / Resolved</th>
+                  <th style="text-align: right;">Action</th>
+                </tr>
+              </thead>
+              <tbody id="studentHistoryTableBody">
+                <tr>
+                  <td colspan="9" style="text-align: center; color: var(--text-muted); padding: 2rem;">
+                    Loading grievance history...
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </section>
+      </div>
+
+      <!-- TAB 3: DIRECT TICKET SEARCH & TIMELINE AUDIT TRAIL -->
+      <div id="tabContentSearch" class="tab-pane" style="display: none;">
+        <section class="card" id="trackingSection">
+          <div class="card-header">
+            <h2 class="card-title">Track Grievance Audit Trail</h2>
+            <p class="card-subtitle">Enter any Ticket ID to inspect its full chronological activity log and escalation trail.</p>
+          </div>
+
+          <form id="trackForm">
+            <div style="display: flex; gap: 0.75rem; align-items: flex-end; flex-wrap: wrap;">
+              <div class="form-group" style="flex: 1; min-width: 200px; margin-bottom: 0;">
+                <label for="trackIdInput">Complaint Ticket ID</label>
+                <input 
+                  type="number" 
+                  id="trackIdInput" 
+                  class="form-control" 
+                  placeholder="e.g. 1" 
+                  min="1" 
+                  required>
+              </div>
+              <button type="submit" id="trackBtn" class="btn btn-outline" style="height: 42px;">
+                Search Status
+              </button>
+            </div>
+          </form>
+
+          <!-- Track Result Box -->
+          <div id="trackResultBox" class="track-result">
+            <div style="display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid var(--border-color); padding-bottom: 0.75rem; margin-bottom: 1rem;">
+              <h3 style="font-size: 1.1rem; font-weight: 700; color: var(--text-main);" id="trackComplaintHeading">Complaint #--</h3>
+              <div id="trackStatusBadge"></div>
+            </div>
+
+            <p id="trackComplaintText" style="font-style: italic; color: var(--text-main); margin-bottom: 1rem; font-size: 0.95rem; line-height: 1.5;"></p>
+
+            <div class="confirmation-grid">
+              <div class="meta-item">
+                <div class="meta-label">Category</div>
+                <div class="meta-value" id="trackCategory">--</div>
+              </div>
+              <div class="meta-item">
+                <div class="meta-label">Urgency</div>
+                <div class="meta-value" id="trackUrgency">--</div>
+              </div>
+              <div class="meta-item">
+                <div class="meta-label">Assigned Authority</div>
+                <div class="meta-value" id="trackAuthority">--</div>
+              </div>
+              <div class="meta-item">
+                <div class="meta-label">Escalation Tier</div>
+                <div class="meta-value" id="trackEscalation">Level 0</div>
+              </div>
+              <div class="meta-item">
+                <div class="meta-label">SLA Deadline</div>
+                <div class="meta-value" id="trackSla" style="font-size: 0.8rem;">--</div>
+              </div>
+              <div class="meta-item">
+                <div class="meta-label">Resolved At</div>
+                <div class="meta-value" id="trackResolvedAt" style="font-size: 0.8rem;">--</div>
+              </div>
+            </div>
+
+            <h4 style="font-size: 0.9rem; font-weight: 700; margin-top: 1.25rem; margin-bottom: 0.5rem;">Audit Trail & Escalation Log</h4>
+            <ul id="trackTimeline" class="timeline">
+              <!-- Populated by JS -->
+            </ul>
+          </div>
+        </section>
+      </div>
+
+    </div>
   </main>
 
   <footer>
-    CampusResolve &copy; 2026 — Automated Institutional Resolution Engine
+    CampusResolve &copy; 2026 — Automated Institutional Grievance Resolution Engine
   </footer>
 
-  <script src="config.js?v=2.3"></script>
-  <script src="app.js?v=2.3"></script>
+  <script src="config.js?v=2.4"></script>
+  <script src="app.js?v=2.4"></script>
 </body>
 </html>

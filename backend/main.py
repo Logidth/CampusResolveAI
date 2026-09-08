@@ -7,6 +7,7 @@ from fastapi import FastAPI, Depends, HTTPException, Query, WebSocket, WebSocket
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
+from sqlalchemy import func, text
 from sqlalchemy.orm import Session
 
 from backend.database import engine, Base, get_db
@@ -30,6 +31,8 @@ from backend.auth import (
     require_admin_user,
     get_optional_user,
     seed_authority_users,
+    validate_student_email,
+    authenticate_or_register_student,
     DEFAULT_ACCOUNTS,
     ACTIVE_SESSIONS,
 )
@@ -45,11 +48,23 @@ async def lifespan(app: FastAPI):
     db = next(get_db())
     try:
         try:
-            from sqlalchemy import text
             db.execute(text("ALTER TABLE complaints ADD COLUMN initial_authority VARCHAR(150)"))
             db.commit()
         except Exception:
             db.rollback()
+
+        try:
+            db.execute(text("ALTER TABLE complaints ADD COLUMN student_email VARCHAR(150)"))
+            db.commit()
+        except Exception:
+            db.rollback()
+
+        try:
+            db.execute(text("ALTER TABLE complaints ADD COLUMN student_name VARCHAR(150)"))
+            db.commit()
+        except Exception:
+            db.rollback()
+
         seed_authority_users(db)
     finally:
         db.close()
@@ -107,6 +122,14 @@ AUTHORITY_MAP = {
 
 class ComplaintCreate(BaseModel):
     text: str
+    student_email: Optional[str] = None
+    student_name: Optional[str] = None
+
+
+class StudentLoginRequest(BaseModel):
+    email: str
+    password: str
+    full_name: Optional[str] = None
 
 
 class ActivityLogOut(BaseModel):
@@ -128,6 +151,8 @@ class ComplaintOut(BaseModel):
     status: str
     assigned_authority: Optional[str] = None
     initial_authority: Optional[str] = None
+    student_email: Optional[str] = None
+    student_name: Optional[str] = None
     escalation_level: int
     no_auto_escalation: bool = False
     created_at: datetime
@@ -279,6 +304,29 @@ def login(payload: LoginRequest, db: Session = Depends(get_db)):
         "access_token": token,
         "token_type": "bearer",
         "user": user,
+    }
+
+
+@app.post("/auth/student-login")
+def student_login(payload: StudentLoginRequest, db: Session = Depends(get_db)):
+    """Authenticate or auto-register student using institutional @kce.ac.in email."""
+    user, token = authenticate_or_register_student(
+        email=payload.email,
+        password=payload.password,
+        full_name=payload.full_name,
+        db=db
+    )
+    return {
+        "access_token": token,
+        "token_type": "bearer",
+        "user": {
+            "id": user.id,
+            "username": user.username,
+            "email": user.email,
+            "full_name": user.full_name,
+            "role": user.role,
+        },
+        "message": f"Welcome, {user.full_name}! Successfully authenticated to Student Portal."
     }
 
 
@@ -449,6 +497,10 @@ def create_complaint(payload: ComplaintCreate, background_tasks: BackgroundTasks
     sla_delta = get_sla_duration(urgency)
     sla_deadline = created_at + sla_delta
 
+    # Clean and validate optional student identity
+    student_email = payload.student_email.strip().lower() if payload.student_email else None
+    student_name = payload.student_name.strip() if payload.student_name else None
+
     # 4. Create Complaint Record
     complaint = Complaint(
         text=payload.text,
@@ -457,6 +509,8 @@ def create_complaint(payload: ComplaintCreate, background_tasks: BackgroundTasks
         status="open",
         assigned_authority=assigned_authority,
         initial_authority=assigned_authority,
+        student_email=student_email,
+        student_name=student_name,
         escalation_level=0,
         no_auto_escalation=no_auto_escalation,
         created_at=created_at,
@@ -551,6 +605,74 @@ def list_complaints(
 def list_counselor_complaints(db: Session = Depends(get_db)):
     """Protected endpoint for Counseling Cell portal to view sensitive harassment records."""
     return db.query(Complaint).filter(Complaint.category == "harassment").order_by(Complaint.created_at.desc()).all()
+
+
+@app.get("/student/complaints")
+def get_student_complaints(
+    email: Optional[str] = Query(None),
+    authorization: Optional[str] = Header(None),
+    db: Session = Depends(get_db)
+):
+    """
+    Retrieve history of grievances submitted by a student, with status, escalation,
+    and resolution remarks from the activity audit log.
+    """
+    current_user = get_optional_user(authorization, db)
+    target_email = None
+    if current_user and current_user.email:
+        target_email = current_user.email.strip().lower()
+    elif email:
+        clean_email = email.strip().lower()
+        if validate_student_email(clean_email):
+            target_email = clean_email
+
+    if not target_email:
+        raise HTTPException(
+            status_code=400,
+            detail="Student email required or invalid. Please log in with your @kce.ac.in credentials."
+        )
+
+    complaints = db.query(Complaint).filter(
+        func.lower(Complaint.student_email) == target_email
+    ).order_by(Complaint.created_at.desc()).all()
+
+    results = []
+    for c in complaints:
+        # Extract resolution remarks if ticket is resolved
+        resolution_remarks = None
+        if c.status == "resolved":
+            res_log = db.query(ActivityLog).filter(
+                ActivityLog.complaint_id == c.id,
+                ActivityLog.action == "RESOLVED"
+            ).order_by(ActivityLog.timestamp.desc()).first()
+            if res_log:
+                resolution_remarks = res_log.details
+
+        results.append({
+            "id": c.id,
+            "text": c.text,
+            "category": c.category or "general",
+            "urgency": c.urgency or "medium",
+            "status": c.status,
+            "assigned_authority": c.assigned_authority,
+            "initial_authority": c.initial_authority,
+            "escalation_level": c.escalation_level,
+            "student_email": c.student_email,
+            "student_name": c.student_name,
+            "created_at": c.created_at.isoformat() if c.created_at else None,
+            "sla_deadline": c.sla_deadline.isoformat() if c.sla_deadline else None,
+            "resolved_at": c.resolved_at.isoformat() if c.resolved_at else None,
+            "resolution_remarks": resolution_remarks,
+        })
+
+    return {
+        "student_email": target_email,
+        "total": len(results),
+        "open_count": sum(1 for x in results if x["status"] == "open"),
+        "escalated_count": sum(1 for x in results if x["escalation_level"] > 0 and x["status"] == "open"),
+        "resolved_count": sum(1 for x in results if x["status"] == "resolved"),
+        "complaints": results,
+    }
 
 
 @app.get("/complaints/{id}", response_model=ComplaintDetailOut)

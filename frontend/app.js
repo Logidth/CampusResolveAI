@@ -90,6 +90,44 @@ async function handleGlobalLogout() {
   window.location.href = "dashboard.html";
 }
 
+// Student Portal Authentication & Session Helpers
+function getStudentToken() {
+  return localStorage.getItem("cr_student_token");
+}
+
+function getStudentUser() {
+  try {
+    const raw = localStorage.getItem("cr_student_user");
+    return raw ? JSON.parse(raw) : null;
+  } catch (e) {
+    return null;
+  }
+}
+
+function setStudentSession(token, user) {
+  localStorage.setItem("cr_student_token", token);
+  localStorage.setItem("cr_student_user", JSON.stringify(user));
+}
+
+function clearStudentSession() {
+  localStorage.removeItem("cr_student_token");
+  localStorage.removeItem("cr_student_user");
+}
+
+function handleStudentLogout() {
+  clearStudentSession();
+  window.location.reload();
+}
+
+function focusStudentAuth() {
+  const card = document.getElementById("studentAuthCard");
+  const emailInput = document.getElementById("stdLoginEmail");
+  if (card) {
+    card.scrollIntoView({ behavior: "smooth" });
+    if (emailInput) emailInput.focus();
+  }
+}
+
 // Helpers: Status & Badge Generators
 function getStatusBadge(status) {
   const s = status ? status.toLowerCase() : "open";
@@ -135,7 +173,270 @@ const trackComplaintLink = document.getElementById("trackComplaintLink");
 const trackForm = document.getElementById("trackForm");
 const trackIdInput = document.getElementById("trackIdInput");
 const trackResultBox = document.getElementById("trackResultBox");
+const studentLoginForm = document.getElementById("studentLoginForm");
 
+let cachedStudentComplaints = [];
+
+// Tab Switcher for Student Portal
+window.switchStudentTab = function (tabName) {
+  const tabs = {
+    submit: { btn: "tabBtnSubmit", content: "tabContentSubmit" },
+    history: { btn: "tabBtnHistory", content: "tabContentHistory" },
+    search: { btn: "tabBtnSearch", content: "tabContentSearch" },
+  };
+
+  Object.keys(tabs).forEach((key) => {
+    const b = document.getElementById(tabs[key].btn);
+    const c = document.getElementById(tabs[key].content);
+    if (b) b.classList.remove("active");
+    if (c) c.style.display = "none";
+  });
+
+  const selected = tabs[tabName];
+  if (selected) {
+    const b = document.getElementById(selected.btn);
+    const c = document.getElementById(selected.content);
+    if (b) b.classList.add("active");
+    if (c) c.style.display = "block";
+    if (tabName === "history") {
+      loadStudentHistory();
+    }
+  }
+};
+
+window.refreshStudentHistory = function () {
+  loadStudentHistory();
+};
+
+window.viewStudentComplaintDetails = function (id) {
+  switchStudentTab("search");
+  if (trackIdInput) {
+    trackIdInput.value = id;
+    loadComplaintDetails(id);
+    document.getElementById("trackingSection")?.scrollIntoView({ behavior: "smooth" });
+  }
+};
+
+// Fetch student grievances history from backend
+async function loadStudentHistory() {
+  const user = getStudentUser();
+  const token = getStudentToken();
+  if (!user || !user.email) return;
+
+  const tableBody = document.getElementById("studentHistoryTableBody");
+  if (tableBody) {
+    tableBody.innerHTML = `
+      <tr>
+        <td colspan="9" style="text-align: center; color: var(--text-muted); padding: 2rem;">
+          Refreshing grievance history...
+        </td>
+      </tr>
+    `;
+  }
+
+  try {
+    const res = await fetch(`${API_BASE}/student/complaints?email=${encodeURIComponent(user.email)}`, {
+      headers: token ? { "Authorization": `Bearer ${token}` } : {}
+    });
+    if (!res.ok) throw new Error("Unable to fetch grievance history.");
+    const data = await res.json();
+    cachedStudentComplaints = data.complaints || [];
+
+    // Update Metric Counters
+    if (document.getElementById("stdStatTotal")) document.getElementById("stdStatTotal").innerText = data.total || 0;
+    if (document.getElementById("stdStatOpen")) document.getElementById("stdStatOpen").innerText = data.open_count || 0;
+    if (document.getElementById("stdStatEscalated")) document.getElementById("stdStatEscalated").innerText = data.escalated_count || 0;
+    if (document.getElementById("stdStatResolved")) document.getElementById("stdStatResolved").innerText = data.resolved_count || 0;
+    if (document.getElementById("historyBadgeCount")) document.getElementById("historyBadgeCount").innerText = data.total || 0;
+
+    renderStudentHistoryTable();
+  } catch (err) {
+    if (tableBody) {
+      tableBody.innerHTML = `
+        <tr>
+          <td colspan="9" style="text-align: center; color: var(--danger); padding: 2rem;">
+            Error loading grievances: ${err.message}
+          </td>
+        </tr>
+      `;
+    }
+  }
+}
+
+// Render the interactive history table
+window.renderStudentHistoryTable = function () {
+  const tableBody = document.getElementById("studentHistoryTableBody");
+  if (!tableBody) return;
+
+  const showOnlyOpen = document.getElementById("stdShowOnlyOpenCheckbox")?.checked;
+  let list = cachedStudentComplaints;
+  if (showOnlyOpen) {
+    list = list.filter((c) => c.status === "open");
+  }
+
+  if (list.length === 0) {
+    tableBody.innerHTML = `
+      <tr>
+        <td colspan="9" style="text-align: center; color: var(--text-muted); padding: 2.5rem 1rem;">
+          <div style="font-size: 2rem; margin-bottom: 0.5rem;">📭</div>
+          <p style="font-weight: 600; color: var(--text-main);">No grievances found</p>
+          <p style="font-size: 0.85rem; margin-top: 0.25rem;">
+            ${cachedStudentComplaints.length === 0 ? "You have not lodged any grievances yet." : "No open grievances match your filter."}
+          </p>
+          <button onclick="switchStudentTab('submit')" class="btn btn-sm btn-primary" style="margin-top: 0.75rem;">
+             Lodge a new grievance &rarr;
+          </button>
+        </td>
+      </tr>
+    `;
+    return;
+  }
+
+  tableBody.innerHTML = list.map((c) => {
+    const isResolved = c.status === "resolved";
+    const escLevel = c.escalation_level || 0;
+    let escBadge = `<span class="badge" style="background: #f1f5f9; color: #64748b;">Normal (L0)</span>`;
+    if (escLevel === 1) {
+      escBadge = `<span class="badge" style="background: #fffbeb; color: #b45309; border: 1px solid #fde68a;">⚡ Level 1 (Dean/VP)</span>`;
+    } else if (escLevel >= 2) {
+      escBadge = `<span class="badge" style="background: #fef2f2; color: #b91c1c; border: 1px solid #fca5a5;">⚡ Level 2 (Principal)</span>`;
+    }
+
+    return `
+      <tr>
+        <td style="font-family: var(--font-mono); font-weight: 700; color: var(--primary);">
+          #${c.id}
+        </td>
+        <td style="max-width: 250px; font-size: 0.88rem;">
+          <div style="font-weight: 500; color: var(--text-main); margin-bottom: 0.25rem;">
+            ${c.text.length > 80 ? c.text.substring(0, 80) + '...' : c.text}
+          </div>
+          ${c.resolution_remarks ? `
+            <div class="resolution-box">
+              <strong>Official Resolution Remarks:</strong><br/>
+              ${c.resolution_remarks}
+            </div>
+          ` : ''}
+        </td>
+        <td><span style="font-weight: 500;">${(c.category || 'General').toUpperCase()}</span></td>
+        <td>${getUrgencyBadge(c.urgency)}</td>
+        <td>
+          <span style="font-weight: 600; color: var(--text-main);">${c.assigned_authority || 'Pending'}</span>
+          ${c.initial_authority && c.initial_authority !== c.assigned_authority ? `
+            <div style="font-size: 0.72rem; color: var(--danger); font-weight: 600;">Escalated from ${c.initial_authority}</div>
+          ` : ''}
+        </td>
+        <td>${escBadge}</td>
+        <td>${getStatusBadge(c.status)}</td>
+        <td style="font-size: 0.8rem; color: var(--text-muted);">
+          ${isResolved ? (c.resolved_at ? formatDate(c.resolved_at) : 'Resolved') : (c.sla_deadline ? formatDate(c.sla_deadline) : 'Standard SLA')}
+        </td>
+        <td style="text-align: right; white-space: nowrap;">
+          <button onclick="viewStudentComplaintDetails(${c.id})" class="btn btn-outline btn-sm" title="View live timeline and audit trail">
+            🔍 Timeline
+          </button>
+        </td>
+      </tr>
+    `;
+  }).join("");
+};
+
+// Initialize Student Portal View States
+function initStudentPortal() {
+  const studentAuthCard = document.getElementById("studentAuthCard");
+  const studentAppSection = document.getElementById("studentAppSection");
+  const studentUserPill = document.getElementById("studentUserPill");
+  const navStudentLoginBtn = document.getElementById("navStudentLoginBtn");
+
+  const studentUser = getStudentUser();
+  const studentToken = getStudentToken();
+
+  if (studentUser && studentToken) {
+    if (studentAuthCard) studentAuthCard.style.display = "none";
+    if (studentAppSection) studentAppSection.style.display = "block";
+    if (studentUserPill) studentUserPill.style.display = "inline-flex";
+    if (navStudentLoginBtn) navStudentLoginBtn.style.display = "none";
+
+    const navEmail = document.getElementById("navStudentEmail");
+    if (navEmail) navEmail.innerText = studentUser.email;
+
+    const welcomeName = document.getElementById("studentDisplayName");
+    if (welcomeName) welcomeName.innerText = studentUser.full_name || studentUser.username;
+
+    const welcomeEmail = document.getElementById("studentDisplayEmail");
+    if (welcomeEmail) welcomeEmail.innerText = studentUser.email;
+
+    const formBadge = document.getElementById("formStudentBadge");
+    if (formBadge) formBadge.innerText = studentUser.email;
+
+    loadStudentHistory();
+  } else {
+    if (studentAuthCard) studentAuthCard.style.display = "block";
+    if (studentAppSection) studentAppSection.style.display = "none";
+    if (studentUserPill) studentUserPill.style.display = "none";
+    if (navStudentLoginBtn) navStudentLoginBtn.style.display = "inline-flex";
+  }
+}
+
+// Student Login Form Listener
+if (studentLoginForm) {
+  studentLoginForm.addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const emailInput = document.getElementById("stdLoginEmail");
+    const passwordInput = document.getElementById("stdLoginPassword");
+    const nameInput = document.getElementById("stdLoginName");
+    const errorDiv = document.getElementById("stdLoginError");
+    const submitBtn = document.getElementById("btnStudentLoginSubmit");
+
+    const email = emailInput.value.trim().toLowerCase();
+    const password = passwordInput.value;
+    const fullName = nameInput ? nameInput.value.trim() : "";
+
+    if (errorDiv) errorDiv.style.display = "none";
+
+    // Strict domain check on client
+    if (!email.endsWith("@kce.ac.in")) {
+      if (errorDiv) {
+        errorDiv.innerText = "Access restricted: Only official college institutional email addresses ending with @kce.ac.in are allowed.";
+        errorDiv.style.display = "block";
+      }
+      return;
+    }
+
+    submitBtn.disabled = true;
+    submitBtn.innerText = "Authenticating...";
+
+    try {
+      const res = await fetch(`${API_BASE}/auth/student-login`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          email: email,
+          password: password,
+          full_name: fullName || undefined
+        })
+      });
+
+      const data = await res.json();
+      if (!res.ok) {
+        throw new Error(data.detail || "Authentication failed. Please check credentials.");
+      }
+
+      setStudentSession(data.access_token, data.user);
+      initStudentPortal();
+    } catch (err) {
+      if (errorDiv) {
+        errorDiv.innerText = err.message;
+        errorDiv.style.display = "block";
+      }
+    } finally {
+      submitBtn.disabled = false;
+      submitBtn.innerText = "🎓 Sign In / Register with @kce.ac.in";
+    }
+  });
+}
+
+// Student Grievance Submission
 if (complaintForm) {
   complaintForm.addEventListener("submit", async (e) => {
     e.preventDefault();
@@ -143,17 +444,29 @@ if (complaintForm) {
     const complaintText = document.getElementById("complaintText").value.trim();
     if (!complaintText) return;
 
+    const studentUser = getStudentUser();
+    const studentToken = getStudentToken();
+
     submitBtn.disabled = true;
-    submitBtn.innerText = "Submitting Complaint...";
+    submitBtn.innerText = "Submitting Grievance...";
 
     try {
+      const payload = {
+        text: complaintText,
+        student_email: studentUser ? studentUser.email : null,
+        student_name: studentUser ? studentUser.full_name : null,
+      };
+
       const res = await fetch(`${API_BASE}/complaints`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ text: complaintText }),
+        headers: {
+          "Content-Type": "application/json",
+          ...(studentToken ? { "Authorization": `Bearer ${studentToken}` } : {})
+        },
+        body: JSON.stringify(payload),
       });
 
-      if (!res.ok) throw new Error("Failed to submit complaint. Server error.");
+      if (!res.ok) throw new Error("Failed to submit grievance. Server error.");
       const data = await res.json();
 
       // Render Confirmation Details
@@ -171,6 +484,7 @@ if (complaintForm) {
       if (trackComplaintLink) {
         trackComplaintLink.onclick = (event) => {
           event.preventDefault();
+          switchStudentTab("search");
           if (trackIdInput) {
             trackIdInput.value = data.id;
             loadComplaintDetails(data.id);
@@ -180,11 +494,13 @@ if (complaintForm) {
       }
 
       complaintForm.reset();
+      // Auto-refresh history so it appears immediately in history tab
+      loadStudentHistory();
     } catch (err) {
       alert("Error: " + err.message);
     } finally {
       submitBtn.disabled = false;
-      submitBtn.innerText = "Submit Complaint";
+      submitBtn.innerText = "Submit Grievance";
     }
   });
 
@@ -192,6 +508,7 @@ if (complaintForm) {
   const urlParams = new URLSearchParams(window.location.search);
   const trackParam = urlParams.get("track");
   if (trackParam && trackIdInput) {
+    switchStudentTab("search");
     trackIdInput.value = trackParam;
     loadComplaintDetails(trackParam);
     document.getElementById("trackingSection")?.scrollIntoView({ behavior: "smooth" });
@@ -255,6 +572,11 @@ if (trackForm) {
       loadComplaintDetails(id);
     }
   });
+}
+
+// Automatically boot student portal states if on index.html
+if (document.getElementById("studentAuthCard") || document.getElementById("studentAppSection")) {
+  initStudentPortal();
 }
 
 

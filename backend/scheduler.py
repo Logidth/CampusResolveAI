@@ -101,11 +101,15 @@ def check_and_escalate_grievances(db: Session = None):
 
         overdue_complaints = []
         for c in candidates:
+            # 1. Apex Authority Guard: If already with Principal, no further escalation exists
+            if c.assigned_authority == "Principal":
+                continue
+
             effective_duration = get_sla_duration(c.urgency)
             is_overdue = False
             if c.sla_deadline and c.sla_deadline < now:
                 is_overdue = True
-            elif c.created_at and (c.created_at + effective_duration) < now:
+            elif c.escalation_level == 0 and c.created_at and (c.created_at + effective_duration) < now:
                 is_overdue = True
             
             if is_overdue:
@@ -115,8 +119,12 @@ def check_and_escalate_grievances(db: Session = None):
             old_authority = c.assigned_authority or "Unassigned"
             new_authority = get_next_authority(old_authority)
             
-            # 1. Increment escalation level
-            c.escalation_level += 1
+            # Guard: If already at apex authority, do not re-escalate
+            if old_authority == "Principal" or new_authority == old_authority:
+                continue
+
+            # 1. Increment escalation level (capped at 2 for Principal)
+            c.escalation_level = min(c.escalation_level + 1, 2)
             
             # 2. Reassign to next tier
             c.assigned_authority = new_authority

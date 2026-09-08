@@ -594,6 +594,8 @@ def simulate_sla_breach(id: int, db: Session = Depends(get_db)):
         raise HTTPException(status_code=400, detail="Cannot escalate a closed or resolved complaint")
     if complaint.no_auto_escalation or complaint.category == "harassment":
         raise HTTPException(status_code=400, detail="This complaint is confidential and protected against automated escalation")
+    if complaint.assigned_authority == "Principal" or complaint.escalation_level >= 2:
+        raise HTTPException(status_code=400, detail="Complaint is already at apex institutional authority (Principal)")
 
     # Force SLA deadline into the past
     complaint.sla_deadline = datetime.utcnow() - timedelta(minutes=5)

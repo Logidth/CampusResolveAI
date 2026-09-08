@@ -346,6 +346,21 @@
             <ul id="trackTimeline" class="timeline">
               <!-- Populated by JS -->
             </ul>
+
+            <!-- Action to Dispute / Report Authority to Principal -->
+            <div id="trackDisputeBanner" style="margin-top: 1.5rem; padding: 1rem 1.25rem; background: #fef2f2; border: 1px solid #fecaca; border-radius: var(--radius-md); display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 1rem;">
+              <div>
+                <div style="font-weight: 700; color: #991b1b; font-size: 0.95rem; display: flex; align-items: center; gap: 0.4rem;">
+                  <span>🚨</span> <span>Dissatisfied or Fake Resolution?</span>
+                </div>
+                <div style="font-size: 0.85rem; color: #7f1d1d; margin-top: 0.2rem;">
+                  If the authority claimed to resolve this grievance without fixing it, or failed to take action, report directly to the Principal (<strong>717824v132@kce.ac.in</strong>).
+                </div>
+              </div>
+              <button type="button" id="trackReportBtn" onclick="openDisputeFromTracker()" class="btn btn-sm" style="background: #dc2626; color: #ffffff; border: none; font-weight: 600; padding: 0.5rem 1rem; border-radius: var(--radius-sm); cursor: pointer;">
+                🚨 Report Authority to Principal
+              </button>
+            </div>
           </div>
         </section>
       </div>
@@ -353,11 +368,70 @@
     </div>
   </main>
 
+  <!-- MODAL: Raise Complaint on Authority / Fake Resolution to Principal -->
+  <div id="disputeAuthorityModal" style="display: none; position: fixed; inset: 0; background: rgba(15, 23, 42, 0.65); backdrop-filter: blur(4px); z-index: 1000; align-items: center; justify-content: center; padding: 1rem;">
+    <div class="card" style="max-width: 550px; width: 100%; border: 1px solid var(--border-color); box-shadow: 0 20px 25px -5px rgba(0,0,0,0.25); border-radius: var(--radius-lg); overflow: hidden; background: #ffffff; padding: 0;">
+      <div style="background: linear-gradient(135deg, #991b1b 0%, #dc2626 100%); color: #ffffff; padding: 1.25rem 1.5rem; display: flex; justify-content: space-between; align-items: center;">
+        <div style="display: flex; align-items: center; gap: 0.6rem;">
+          <span style="font-size: 1.5rem;">🚨</span>
+          <div>
+            <h3 style="font-size: 1.15rem; font-weight: 700; margin: 0; color: #ffffff;">Report Authority to Principal</h3>
+            <p style="font-size: 0.78rem; color: #fecaca; margin: 0.2rem 0 0 0;">Official executive review dispatched to <strong>717824v132@kce.ac.in</strong></p>
+          </div>
+        </div>
+        <button type="button" onclick="closeDisputeModal()" style="background: transparent; border: none; color: #ffffff; font-size: 1.6rem; cursor: pointer; line-height: 1;">&times;</button>
+      </div>
+      
+      <form id="disputeAuthorityForm" style="padding: 1.5rem;" onsubmit="submitDisputeAuthority(event)">
+        <input type="hidden" id="disputeTicketId" value="">
+
+        <div class="form-group" style="margin-bottom: 1rem;">
+          <label style="font-weight: 600; font-size: 0.85rem; color: var(--text-main);">Target Ticket Reference</label>
+          <div id="disputeTicketDisplay" style="font-family: var(--font-mono); font-weight: 700; color: var(--primary); font-size: 0.95rem; background: var(--bg-main); padding: 0.5rem 0.75rem; border-radius: var(--radius-sm); border: 1px solid var(--border-color);">
+            --
+          </div>
+        </div>
+
+        <div class="form-group" style="margin-bottom: 1rem;">
+          <label for="disputeAuthorityName" style="font-weight: 600; font-size: 0.85rem; color: var(--text-main);">Authority Being Reported</label>
+          <input type="text" id="disputeAuthorityName" class="form-control" readonly style="background: var(--bg-main); color: var(--text-main); font-weight: 600;">
+        </div>
+
+        <div class="form-group" style="margin-bottom: 1rem;">
+          <label for="disputeReason" style="font-weight: 600; font-size: 0.85rem; color: var(--text-main);">Type of Grievance on Authority</label>
+          <select id="disputeReason" class="form-control" required>
+            <option value="Fake Resolution (Claimed resolved without fixing)">Fake Resolution (Marked resolved but issue still persists)</option>
+            <option value="Complete Inaction / Authority Unresponsive">Complete Inaction / Authority unresponsive</option>
+            <option value="Improper Conduct / Dismissive Behavior">Improper Conduct / Dismissive behavior</option>
+            <option value="Unsatisfactory Partial Fix">Unsatisfactory Partial Fix</option>
+            <option value="Other Authority Malpractice">Other Authority Malpractice</option>
+          </select>
+        </div>
+
+        <div class="form-group" style="margin-bottom: 1.25rem;">
+          <label for="disputeDescription" style="font-weight: 600; font-size: 0.85rem; color: var(--text-main);">
+            Description & Evidence <span style="color: #dc2626;">*</span>
+          </label>
+          <textarea id="disputeDescription" class="form-control" rows="4" placeholder="Describe how the authority failed or how the resolution was fake (e.g. 'Authority marked resolved on Monday claiming tap was repaired, but water is still leaking onto the floor...'). This will be directly emailed to the Principal." required></textarea>
+        </div>
+
+        <div id="disputeStatusMsg" style="display: none; padding: 0.75rem; border-radius: var(--radius-sm); margin-bottom: 1rem; font-size: 0.85rem;"></div>
+
+        <div style="display: flex; gap: 0.75rem; justify-content: flex-end;">
+          <button type="button" onclick="closeDisputeModal()" class="btn btn-outline">Cancel</button>
+          <button type="submit" id="disputeSubmitBtn" class="btn btn-primary" style="background: #dc2626; border-color: #b91c1c; font-weight: 600;">
+            🚨 Send Report to Principal
+          </button>
+        </div>
+      </form>
+    </div>
+  </div>
+
   <footer>
     CampusResolve &copy; 2026 — Automated Institutional Grievance Resolution Engine
   </footer>
 
   <script src="config.js?v=2.4"></script>
-  <script src="app.js?v=2.4"></script>
+  <script src="app.js?v=2.5"></script>
 </body>
 </html>

@@ -332,9 +332,14 @@ window.renderStudentHistoryTable = function () {
           ${isResolved ? (c.resolved_at ? formatDate(c.resolved_at) : 'Resolved') : (c.sla_deadline ? formatDate(c.sla_deadline) : 'Standard SLA')}
         </td>
         <td style="text-align: right; white-space: nowrap;">
-          <button onclick="viewStudentComplaintDetails('${c.ticket_id || c.id}')" class="btn btn-outline btn-sm" title="View live timeline and audit trail">
-            🔍 Timeline
-          </button>
+          <div style="display: inline-flex; gap: 0.35rem; align-items: center;">
+            <button onclick="viewStudentComplaintDetails('${c.ticket_id || c.id}')" class="btn btn-outline btn-sm" title="View live timeline and audit trail">
+              🔍 Timeline
+            </button>
+            <button onclick="openDisputeModal('${c.ticket_id || c.id}', '${(c.assigned_authority || '').replace(/'/g, "\\'")}')" class="btn btn-sm" style="background: #fef2f2; border: 1px solid #fca5a5; color: #b91c1c; font-weight: 600; font-size: 0.78rem; padding: 0.25rem 0.6rem;" title="Report authority or fake resolution to Principal">
+              🚨 Report
+            </button>
+          </div>
         </td>
       </tr>
     `;
@@ -580,6 +585,9 @@ async function loadComplaintDetails(id) {
         timelineEl.innerHTML = `<li class="timeline-item">No activity logs recorded.</li>`;
       }
 
+      currentTrackedTicket = data.ticket_id || data.id;
+      currentTrackedAuthority = data.assigned_authority || "Assigned Authority";
+
       trackResultBox.style.display = "block";
     }
   } catch (err) {
@@ -607,6 +615,118 @@ if (trackForm) {
     }
   });
 }
+
+// Dispute / Report Authority to Principal Handlers
+let currentTrackedTicket = "";
+let currentTrackedAuthority = "";
+
+window.openDisputeFromTracker = function() {
+  if (currentTrackedTicket) {
+    openDisputeModal(currentTrackedTicket, currentTrackedAuthority);
+  } else {
+    const entered = trackIdInput ? trackIdInput.value.trim() : "";
+    if (entered) {
+      openDisputeModal(entered, "Assigned Authority");
+    }
+  }
+};
+
+window.openDisputeModal = function(ticketRef, authorityName) {
+  const modal = document.getElementById("disputeAuthorityModal");
+  if (!modal) return;
+  
+  const ticketInput = document.getElementById("disputeTicketId");
+  const ticketDisplay = document.getElementById("disputeTicketDisplay");
+  const authInput = document.getElementById("disputeAuthorityName");
+  const descInput = document.getElementById("disputeDescription");
+  const statusMsg = document.getElementById("disputeStatusMsg");
+  
+  if (statusMsg) statusMsg.style.display = "none";
+  if (descInput) descInput.value = "";
+  
+  if (ticketInput) ticketInput.value = ticketRef || "";
+  if (ticketDisplay) ticketDisplay.innerText = ticketRef || "Select or enter ticket";
+  if (authInput) authInput.value = authorityName || "Assigned Authority";
+  
+  modal.style.display = "flex";
+};
+
+window.closeDisputeModal = function() {
+  const modal = document.getElementById("disputeAuthorityModal");
+  if (modal) modal.style.display = "none";
+};
+
+window.submitDisputeAuthority = async function(e) {
+  e.preventDefault();
+  const ticketRef = document.getElementById("disputeTicketId")?.value;
+  const reason = document.getElementById("disputeReason")?.value;
+  const description = document.getElementById("disputeDescription")?.value?.trim();
+  const statusMsg = document.getElementById("disputeStatusMsg");
+  const submitBtn = document.getElementById("disputeSubmitBtn");
+  
+  if (!ticketRef) {
+    alert("Ticket reference is required.");
+    return;
+  }
+  if (!description) {
+    alert("Please provide details explaining why you are reporting this authority to the Principal.");
+    return;
+  }
+
+  const token = getStudentToken();
+  if (submitBtn) {
+    submitBtn.disabled = true;
+    submitBtn.innerText = "Dispatching report to Principal...";
+  }
+
+  try {
+    const res = await fetch(`${API_BASE}/complaints/${encodeURIComponent(ticketRef)}/dispute`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        ...(token ? { "Authorization": `Bearer ${token}` } : {})
+      },
+      body: JSON.stringify({
+        reason: reason,
+        description: description
+      })
+    });
+
+    const data = await res.json();
+    if (!res.ok) {
+      throw new Error(data.detail || "Failed to submit dispute to Principal.");
+    }
+
+    if (statusMsg) {
+      statusMsg.style.display = "block";
+      statusMsg.style.background = "#f0fdf4";
+      statusMsg.style.border = "1px solid #bbf7d0";
+      statusMsg.style.color = "#166534";
+      statusMsg.innerHTML = `<strong>Escalation Successful:</strong> ${data.message || "Dispatched directly to Principal (717824v132@kce.ac.in)."}`;
+    }
+
+    setTimeout(() => {
+      closeDisputeModal();
+      loadStudentHistory();
+      if (trackIdInput && trackIdInput.value === ticketRef) {
+        loadComplaintDetails(ticketRef);
+      }
+    }, 1600);
+  } catch (err) {
+    if (statusMsg) {
+      statusMsg.style.display = "block";
+      statusMsg.style.background = "#fef2f2";
+      statusMsg.style.border = "1px solid #fecaca";
+      statusMsg.style.color = "#991b1b";
+      statusMsg.innerHTML = `<strong>Error:</strong> ${err.message}`;
+    }
+  } finally {
+    if (submitBtn) {
+      submitBtn.disabled = false;
+      submitBtn.innerText = "🚨 Send Report to Principal";
+    }
+  }
+};
 
 // Automatically boot student portal states if on index.html
 if (document.getElementById("studentAuthCard") || document.getElementById("studentAppSection")) {
@@ -666,7 +786,7 @@ if (authLoggedOutView && authLoggedInView) {
     "Dean of Student Affairs": "abijithmohanan2006@gmail.com",
     "Dean of Academics": "717824v101@kce.ac.in",
     "Vice Principal": "logidth78@gmail.com",
-    "Principal": "717824v127@kce.ac.in",
+    "Principal": "717824v132@kce.ac.in",
     "Counseling Cell": "717824v152@kce.ac.in",
     "Admin": "717824v134@kce.ac.in",
     "All": "717824v134@kce.ac.in"
@@ -1520,7 +1640,7 @@ if (adminUsersTableBody) {
         if (tierInput) tierInput.value = "Tier 2 — Executive Oversight";
       } else if (val === "Principal") {
         if (tierInput) tierInput.value = "Tier 3 — Apex Institutional Authority";
-        if (emailInput && !emailInput.value) emailInput.value = "717824v127@kce.ac.in";
+        if (emailInput && !emailInput.value) emailInput.value = "717824v132@kce.ac.in";
       } else if (val === "Counseling Cell") {
         if (tierInput) tierInput.value = "Protected — Student Safety & Wellness";
         if (emailInput && !emailInput.value) emailInput.value = "717824v152@kce.ac.in";

@@ -20,6 +20,7 @@ from backend.notifier import (
     get_sent_emails,
     send_new_complaint_email,
     send_complaint_resolved_email,
+    send_authority_dispute_email_to_principal,
     send_test_email,
     get_authority_email,
     AUTHORITY_DIRECTORY
@@ -874,6 +875,11 @@ class ComplaintResolveRequest(BaseModel):
     remarks: Optional[str] = None
 
 
+class DisputeAuthorityRequest(BaseModel):
+    reason: Optional[str] = "Fake resolution or unresolved failure"
+    description: str
+
+
 class TestEmailRequest(BaseModel):
     recipient: Optional[str] = None
 
@@ -1008,6 +1014,109 @@ def resolve_complaint(
         sla_deadline=complaint.sla_deadline,
         resolved_at=complaint.resolved_at,
     )
+
+
+@app.post("/complaints/{id_or_ticket}/dispute")
+def dispute_complaint_resolution(
+    id_or_ticket: str,
+    payload: DisputeAuthorityRequest,
+    background_tasks: BackgroundTasks,
+    authorization: Optional[str] = Header(None),
+    db: Session = Depends(get_db)
+):
+    """
+    Allows a student to raise a complaint/appeal on an authority who failed to resolve
+    an issue or marked it with a 'fake resolution'.
+    Reopens the ticket, escalates directly to the Principal (Level 2), sets an urgent
+    2-hour SLA, records an audit log entry, and dispatches a high-priority alert email
+    to the Principal (717824v132@kce.ac.in).
+    """
+    clean_ref = id_or_ticket.strip()
+    if clean_ref.isdigit():
+        complaint = db.query(Complaint).filter(Complaint.id == int(clean_ref)).first()
+    else:
+        complaint = db.query(Complaint).filter(Complaint.ticket_id == clean_ref).first()
+
+    if not complaint:
+        raise HTTPException(status_code=404, detail=f"Complaint ticket '{clean_ref}' not found")
+
+    current_user = get_optional_user(authorization, db)
+
+    # Validate student ownership
+    if current_user and current_user.role == "Student":
+        if not complaint.student_email or complaint.student_email.strip().lower() != current_user.email.strip().lower():
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Access restricted: You can only raise a dispute for grievances filed under your own student account."
+            )
+    elif complaint.student_email:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Authentication required: Please sign in with your student credentials to report an authority."
+        )
+
+    if not payload.description or not payload.description.strip():
+        raise HTTPException(status_code=400, detail="Description is required to report an authority to the Principal.")
+
+    previous_authority = complaint.assigned_authority or "Assigned Authority"
+    ticket_ref = complaint.ticket_id or f"t{complaint.id}"
+
+    # Reopen and escalate to Principal
+    complaint.status = "open"
+    complaint.assigned_authority = "Principal"
+    complaint.escalation_level = 2
+    complaint.sla_deadline = datetime.utcnow() + timedelta(hours=2)
+    complaint.resolved_at = None
+
+    # Activity Log
+    reason_str = payload.reason or "Fake resolution / authority failure"
+    desc_str = payload.description.strip()
+    log_details = (
+        f"STUDENT DISPUTE TO PRINCIPAL: Reported authority '{previous_authority}'. "
+        f"Reason: {reason_str}. Evidence: {desc_str}. Reassigned to Principal for executive intervention."
+    )
+    log_entry = ActivityLog(
+        complaint_id=complaint.id,
+        action="DISPUTED_TO_PRINCIPAL",
+        details=log_details,
+        timestamp=datetime.utcnow(),
+    )
+    db.add(log_entry)
+    db.commit()
+    db.refresh(complaint)
+    db.refresh(log_entry)
+
+    # Asynchronously dispatch email to Principal (717824v132@kce.ac.in)
+    background_tasks.add_task(
+        send_authority_dispute_email_to_principal,
+        complaint_id=complaint.id,
+        ticket_id=ticket_ref,
+        complaint_text=complaint.text,
+        reported_authority=previous_authority,
+        dispute_reason=reason_str,
+        student_description=desc_str,
+        student_email=complaint.student_email
+    )
+
+    # Broadcast WebSocket update
+    broadcast_activity_sync({
+        "id": log_entry.id,
+        "complaint_id": complaint.id,
+        "action": log_entry.action,
+        "details": log_entry.details,
+        "timestamp": log_entry.timestamp.isoformat(),
+        "complaint_text": (complaint.text[:60] + "...") if len(complaint.text) > 60 else complaint.text,
+        "complaint_status": complaint.status,
+        "assigned_authority": complaint.assigned_authority,
+    })
+
+    return {
+        "status": "success",
+        "message": f"Complaint #{ticket_ref} escalated directly to Principal (717824v132@kce.ac.in). Official executive investigation initiated.",
+        "ticket_id": ticket_ref,
+        "assigned_authority": "Principal",
+        "complaint_status": complaint.status,
+    }
 
 
 @app.get("/activity-feed", response_model=List[ActivityFeedItem])

@@ -318,7 +318,7 @@ DEFAULT_ACCOUNTS = [
     {
         "username": "principal",
         "password": "principal123",
-        "email": os.getenv("EMAIL_PRINCIPAL", "717824v127@kce.ac.in"),
+        "email": os.getenv("EMAIL_PRINCIPAL", "717824v132@kce.ac.in"),
         "full_name": "Dr. K. S. Pillai (Principal / Director)",
         "role": "Principal",
         "assigned_authority": "Principal",

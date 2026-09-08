@@ -69,7 +69,7 @@ AUTHORITY_DIRECTORY = {
     },
     "Principal": {
         "name": "Office of the Principal / Director",
-        "email": os.getenv("EMAIL_PRINCIPAL", "717824v127@kce.ac.in"),
+        "email": os.getenv("EMAIL_PRINCIPAL", "717824v132@kce.ac.in"),
         "tier": "Tier 3 — Apex Institutional Authority"
     },
     "Counseling Cell": {
@@ -774,6 +774,168 @@ Tracking Link:
     logger.info(f"[EMAIL DISPATCH] Sent resolution notice to {assigned_authority} <{recipient_email}> for Complaint #{complaint_id}")
     _dispatch_smtp(recipient_email, subject, plain_body, html_body)
     return email_record
+
+
+def send_authority_dispute_email_to_principal(
+    complaint_id: int,
+    ticket_id: Optional[str],
+    complaint_text: str,
+    reported_authority: str,
+    dispute_reason: str,
+    student_description: str,
+    student_email: Optional[str] = None
+) -> bool:
+    """
+    Directly dispatches an urgent grievance appeal/dispute email to the Principal (717824v132@kce.ac.in).
+    Triggered when a student reports that an authority has failed to resolve an issue or falsely marked it resolved.
+    """
+    recipient_email = os.getenv("EMAIL_PRINCIPAL", "717824v132@kce.ac.in")
+    principal_info = AUTHORITY_DIRECTORY.get("Principal", {})
+    principal_name = principal_info.get("name", "Office of the Principal / Director")
+
+    ticket_label = ticket_id or f"#{complaint_id}"
+    subject = f"🚨 [STUDENT APPEAL TO PRINCIPAL] Dispute on {reported_authority}: Ticket {ticket_label} ({dispute_reason})"
+
+    timestamp_str = datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S UTC")
+    authority_portal_link = f"{BASE_URL}/app/dashboard.html?complaint_id={complaint_id}"
+
+    plain_body = f"""
+URGENT: {principal_name}
+Official Student Appeal — Misconduct / Resolution Dispute Notification
+
+A student has submitted an official complaint and escalation to the Office of the Principal regarding {reported_authority}'s handling of their grievance.
+
+==================================================
+DISPUTE / APPEAL DETAILS
+==================================================
+Ticket Reference: {ticket_label} (Complaint #{complaint_id})
+Reported Authority: {reported_authority}
+Dispute Type: {dispute_reason}
+Submitted On: {timestamp_str}
+
+Student Statement / Evidence:
+"{student_description}"
+
+Original Grievance Text:
+"{complaint_text}"
+
+==================================================
+DIRECT EXECUTIVE ACTION REQUIRED
+==================================================
+Please open the CampusResolve Authority Portal immediately to review the audit trail, examine the reported authority's resolution remarks, and take executive action:
+
+👉 Review in Authority Portal:
+{authority_portal_link}
+
+==================================================
+CampusResolve Institutional Oversight Engine
+"""
+
+    html_body = f"""
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <style>
+    body {{ font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; background-color: #f8fafc; margin: 0; padding: 20px; color: #0f172a; }}
+    .container {{ max-width: 600px; margin: 0 auto; background: #ffffff; border: 1px solid #e2e8f0; border-radius: 8px; overflow: hidden; box-shadow: 0 4px 6px -1px rgba(0,0,0,0.05); }}
+    .header {{ background: #991b1b; color: #ffffff; padding: 20px 24px; }}
+    .header h1 {{ margin: 0; font-size: 18px; font-weight: 700; }}
+    .content {{ padding: 24px; }}
+    .alert-banner {{ background: #fef2f2; border: 1px solid #fecaca; border-radius: 6px; padding: 12px 16px; margin-bottom: 20px; color: #991b1b; font-size: 14px; font-weight: 500; }}
+    .meta-table {{ width: 100%; border-collapse: collapse; margin-bottom: 20px; }}
+    .meta-table td {{ padding: 8px 10px; border-bottom: 1px solid #f1f5f9; font-size: 14px; }}
+    .meta-table td.label {{ color: #64748b; font-weight: 600; width: 40%; }}
+    .meta-table td.val {{ color: #0f172a; font-weight: 600; }}
+    .badge {{ display: inline-block; padding: 2px 8px; border-radius: 4px; font-size: 12px; font-weight: 700; }}
+    .badge-urgent {{ background: #fee2e2; color: #b91c1c; border: 1px solid #fca5a5; }}
+    .statement-box {{ background: #fff1f2; border-left: 4px solid #e11d48; padding: 14px; margin: 16px 0; border-radius: 4px; font-size: 14px; line-height: 1.5; color: #881337; }}
+    .original-box {{ background: #f8fafc; border-left: 4px solid #64748b; padding: 14px; margin: 16px 0; border-radius: 4px; font-size: 13px; line-height: 1.5; color: #334155; }}
+    .btn-container {{ text-align: center; margin: 25px 0 15px 0; }}
+    .btn {{ display: inline-block; background: #991b1b; color: #ffffff !important; text-decoration: none; padding: 12px 24px; border-radius: 6px; font-weight: 600; font-size: 14px; box-shadow: 0 2px 4px rgba(153,27,27,0.2); }}
+    .btn:hover {{ background: #7f1d1d; }}
+    .footer {{ background: #f8fafc; padding: 14px; text-align: center; font-size: 12px; color: #94a3b8; border-top: 1px solid #e2e8f0; }}
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="header">
+      <h1>🚨 Student Escalation & Appeal to Principal</h1>
+    </div>
+    <div class="content">
+      <div class="alert-banner">
+        <strong>Attention Office of the Principal:</strong> A student has lodged an official dispute regarding an authority failing to resolve or falsely marking their grievance as resolved.
+      </div>
+
+      <table class="meta-table">
+        <tr>
+          <td class="label">Ticket Reference</td>
+          <td class="val"><strong>{ticket_label}</strong> (Complaint #{complaint_id})</td>
+        </tr>
+        <tr>
+          <td class="label">Reported Authority</td>
+          <td class="val"><span style="color: #b91c1c; font-weight: 700;">{reported_authority}</span></td>
+        </tr>
+        <tr>
+          <td class="label">Dispute Reason</td>
+          <td class="val"><span class="badge badge-urgent">{dispute_reason}</span></td>
+        </tr>
+        <tr>
+          <td class="label">Dispatched On</td>
+          <td class="val">{timestamp_str}</td>
+        </tr>
+      </table>
+
+      <div style="font-weight: 700; color: #0f172a; margin-top: 16px; font-size: 14px;">
+        📝 Student's Dispute Description / Evidence:
+      </div>
+      <div class="statement-box">
+        "{student_description}"
+      </div>
+
+      <div style="font-weight: 600; color: #64748b; margin-top: 12px; font-size: 13px;">
+        Original Student Grievance:
+      </div>
+      <div class="original-box">
+        "{complaint_text}"
+      </div>
+
+      <div class="btn-container">
+        <a href="{authority_portal_link}" class="btn">
+          🔍 Inspect Ticket & Intervene as Principal &rarr;
+        </a>
+      </div>
+    </div>
+    <div class="footer">
+      CampusResolve Autonomous Grievance Engine &middot; Executive Institutional Oversight
+    </div>
+  </div>
+</body>
+</html>
+"""
+
+    # Record in local sent email registry
+    _sent_emails.insert(0, {
+        "id": len(_sent_emails) + 1,
+        "complaint_id": complaint_id,
+        "type": "AUTHORITY_DISPUTE_APPEAL",
+        "recipient_name": principal_name,
+        "recipient_authority": "Principal",
+        "recipient_email": recipient_email,
+        "subject": subject,
+        "body": plain_body.strip(),
+        "html_body": html_body.strip(),
+        "portal_link": authority_portal_link,
+        "category": "appeal",
+        "timestamp": datetime.utcnow().isoformat()
+    })
+
+    logger.info(
+        f"[APPEAL DISPATCH] Sent to Principal <{recipient_email}>: Complaint #{complaint_id} ({ticket_label}) "
+        f"dispute on '{reported_authority}' ({dispute_reason})"
+    )
+
+    return _dispatch_smtp(recipient_email, subject, plain_body, html_body)
 
 
 def get_sent_emails(authority: Optional[str] = None) -> List[Dict[str, Any]]:

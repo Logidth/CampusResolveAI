@@ -51,6 +51,7 @@ def create_session_token(user: User) -> str:
         "role": user.role,
         "assigned_authority": user.assigned_authority,
         "tier": user.tier,
+        "must_change_password": bool(getattr(user, "must_change_password", False)),
         "expires_at": datetime.utcnow() + timedelta(days=7),
     }
     return token
@@ -98,6 +99,16 @@ def get_current_user(
     return user
 
 
+def require_admin_user(current_user: User = Depends(get_current_user)) -> User:
+    """FastAPI dependency strictly restricting access to Central Admin."""
+    if current_user.role != "Admin":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Access forbidden: Central Administrator privileges required."
+        )
+    return current_user
+
+
 def get_optional_user(
     authorization: Optional[str] = Header(None),
     db: Session = Depends(get_db)
@@ -120,7 +131,8 @@ DEFAULT_ACCOUNTS = [
         "full_name": "Prof. R. K. Sharma (Warden)",
         "role": "Warden",
         "assigned_authority": "Warden",
-        "tier": "Tier 1 — Operational (Hostels)"
+        "tier": "Tier 1 — Operational (Hostels)",
+        "must_change_password": False
     },
     {
         "username": "mess",
@@ -129,16 +141,18 @@ DEFAULT_ACCOUNTS = [
         "full_name": "Dr. Ananya Gupta (Mess Committee)",
         "role": "Mess Committee",
         "assigned_authority": "Mess Committee",
-        "tier": "Tier 1 — Operational (Dining & Mess)"
+        "tier": "Tier 1 — Operational (Dining & Mess)",
+        "must_change_password": False
     },
     {
-        "username": "hod",
-        "password": "hod123",
-        "email": os.getenv("EMAIL_HOD", "717824v101@kce.ac.in"),
-        "full_name": "Dr. Vikram Malhotra (HOD)",
-        "role": "HOD",
-        "assigned_authority": "HOD",
-        "tier": "Tier 1 — Operational (Academics)"
+        "username": "exam_cell",
+        "password": "examcell123",
+        "email": os.getenv("EMAIL_EXAM_CELL", "717824v101@kce.ac.in"),
+        "full_name": "Controller of Examinations (Exam Cell Admin)",
+        "role": "Exam Cell Admin",
+        "assigned_authority": "Exam Cell Admin",
+        "tier": "Tier 1 — Operational (Marks, Semester & Fees)",
+        "must_change_password": False
     },
     {
         "username": "estate",
@@ -147,7 +161,8 @@ DEFAULT_ACCOUNTS = [
         "full_name": "Er. S. N. Roy (Estate Office)",
         "role": "Estate Office",
         "assigned_authority": "Estate Office",
-        "tier": "Tier 1 — Operational (Infrastructure)"
+        "tier": "Tier 1 — Operational (Infrastructure)",
+        "must_change_password": False
     },
     {
         "username": "dean_student",
@@ -156,7 +171,8 @@ DEFAULT_ACCOUNTS = [
         "full_name": "Prof. Maya Verma (Dean Student Affairs)",
         "role": "Dean of Student Affairs",
         "assigned_authority": "Dean of Student Affairs",
-        "tier": "Tier 2 — Executive (Hostel & Mess)"
+        "tier": "Tier 2 — Executive (Hostel & Mess)",
+        "must_change_password": False
     },
     {
         "username": "dean_academic",
@@ -165,7 +181,8 @@ DEFAULT_ACCOUNTS = [
         "full_name": "Prof. Rajesh Iyer (Dean Academics)",
         "role": "Dean of Academics",
         "assigned_authority": "Dean of Academics",
-        "tier": "Tier 2 — Executive (Academics)"
+        "tier": "Tier 2 — Executive (Academics)",
+        "must_change_password": False
     },
     {
         "username": "vice_principal",
@@ -174,7 +191,8 @@ DEFAULT_ACCOUNTS = [
         "full_name": "Prof. Arvind Swaminathan (Vice Principal)",
         "role": "Vice Principal",
         "assigned_authority": "Vice Principal",
-        "tier": "Tier 2 — Executive (Infrastructure)"
+        "tier": "Tier 2 — Executive (Infrastructure)",
+        "must_change_password": False
     },
     {
         "username": "principal",
@@ -183,7 +201,8 @@ DEFAULT_ACCOUNTS = [
         "full_name": "Dr. K. S. Pillai (Principal / Director)",
         "role": "Principal",
         "assigned_authority": "Principal",
-        "tier": "Tier 3 — Apex Institutional Authority"
+        "tier": "Tier 3 — Apex Institutional Authority",
+        "must_change_password": False
     },
     {
         "username": "counselor",
@@ -192,22 +211,56 @@ DEFAULT_ACCOUNTS = [
         "full_name": "Dr. Sunita Rao (Chief Counselor)",
         "role": "Counseling Cell",
         "assigned_authority": "Counseling Cell",
-        "tier": "Protected — Student Safety & Wellness"
+        "tier": "Protected — Student Safety & Wellness",
+        "must_change_password": False
     },
     {
-        "username": "admin",
-        "password": "admin123",
+        "username": "logi",
+        "password": "admin@1",
         "email": os.getenv("EMAIL_ADMIN", "717824v134@kce.ac.in"),
-        "full_name": "Central Institutional Administrator",
+        "full_name": "Logi (Central Institutional Administrator)",
         "role": "Admin",
         "assigned_authority": "All",
-        "tier": "Central Administration"
+        "tier": "Central Administration",
+        "must_change_password": False
     }
 ]
 
 
 def seed_authority_users(db: Session):
     """Seed default authority user accounts into SQLite database if not present."""
+    # 1. Ensure must_change_password column exists (SQLite auto-migration)
+    try:
+        from sqlalchemy import text
+        db.execute(text("ALTER TABLE users ADD COLUMN must_change_password BOOLEAN DEFAULT 0"))
+        db.commit()
+    except Exception:
+        db.rollback()
+
+    # 2. Migrate legacy 'admin' to 'logi' with admin@1
+    legacy_admin = db.query(User).filter(User.username == "admin").first()
+    if legacy_admin:
+        legacy_admin.username = "logi"
+        legacy_admin.hashed_password = hash_password("admin@1")
+        legacy_admin.full_name = "Logi (Central Institutional Administrator)"
+        legacy_admin.role = "Admin"
+        legacy_admin.assigned_authority = "All"
+        legacy_admin.tier = "Central Administration"
+        legacy_admin.must_change_password = False
+        db.commit()
+
+    # 3. Migrate legacy 'hod' to 'exam_cell'
+    legacy_hod = db.query(User).filter(User.username == "hod").first()
+    if legacy_hod:
+        legacy_hod.username = "exam_cell"
+        legacy_hod.hashed_password = hash_password("examcell123")
+        legacy_hod.full_name = "Controller of Examinations (Exam Cell Admin)"
+        legacy_hod.role = "Exam Cell Admin"
+        legacy_hod.assigned_authority = "Exam Cell Admin"
+        legacy_hod.tier = "Tier 1 — Operational (Marks, Semester & Fees)"
+        legacy_hod.email = os.getenv("EMAIL_EXAM_CELL", "717824v101@kce.ac.in")
+        db.commit()
+
     count_seeded = 0
     for acc in DEFAULT_ACCOUNTS:
         existing = db.query(User).filter(User.username == acc["username"]).first()
@@ -221,18 +274,21 @@ def seed_authority_users(db: Session):
                 role=acc["role"],
                 assigned_authority=acc["assigned_authority"],
                 tier=acc["tier"],
+                must_change_password=acc.get("must_change_password", False),
                 created_at=datetime.utcnow(),
             )
             db.add(new_user)
             count_seeded += 1
         else:
-            # Update password hash, email, and details
-            existing.hashed_password = hash_password(acc["password"])
+            # Refresh details for default accounts
             existing.email = acc["email"]
             existing.full_name = acc["full_name"]
             existing.role = acc["role"]
             existing.assigned_authority = acc["assigned_authority"]
             existing.tier = acc["tier"]
+            # Ensure default credentials match for system accounts
+            if acc["username"] in ("logi", "exam_cell") and not verify_password(acc["password"], existing.hashed_password):
+                existing.hashed_password = hash_password(acc["password"])
             
     db.commit()
     if count_seeded > 0:

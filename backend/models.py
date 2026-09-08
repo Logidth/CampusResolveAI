@@ -27,6 +27,7 @@ class ActivityLog(Base):
     __tablename__ = "activity_log"
 
     id = Column(Integer, primary_key=True, index=True, autoincrement=True)
+    
     complaint_id = Column(Integer, ForeignKey("complaints.id"), nullable=False)
     action = Column(String(100), nullable=False)
     details = Column(Text, nullable=True)
@@ -47,5 +48,6 @@ class User(Base):
     role = Column(String(50), nullable=False)  # "Warden", "Dean of Student Affairs", "Admin", etc.
     assigned_authority = Column(String(150), nullable=True)  # Name of jurisdiction or None for Admin
     tier = Column(String(100), nullable=True)
+    must_change_password = Column(Boolean, default=False, nullable=False)
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
 

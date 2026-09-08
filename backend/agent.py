@@ -123,14 +123,16 @@ def _heuristic_mock_classify(text: str) -> Dict[str, Any]:
         "curry", "rice", "chapati", "snack", "snacks", "tea", "coffee", "cafeteria"
     ]
 
-    # Academic & Faculty (Handled by HOD)
+    # Academic, Examination & Fee Matters (Handled by Exam Cell Admin)
     academic_kws = [
         "academic", "academics", "exam", "exams", "examination", "examinations",
         "grade", "grades", "grading", "mark", "marks", "result", "results",
         "attendance", "internal", "internals", "gpa", "cgpa", "re-evaluation",
         "revaluation", "professor", "professors", "faculty", "teacher", "teachers",
         "lecture", "lectures", "course", "courses", "curriculum", "syllabus",
-        "assignment", "assignments", "semester", "timetable", "subject", "credits", "hod",
+        "assignment", "assignments", "semester", "timetable", "subject", "credits", "exam cell",
+        "fee", "fees", "exam fee", "semester fee", "tuition fee", "hall ticket", "hallticket",
+        "fine", "fines", "arrear", "arrears", "supplementary", "marksheet", "transcript",
         "schedule", "scheduled", "cia", "cia-i", "cia-ii", "cia-1", "cia-2"
     ]
 
@@ -205,7 +207,7 @@ def classify_complaint(text: str) -> Dict[str, Any]:
                             "category": {
                                 "type": "string",
                                 "enum": VALID_CATEGORIES,
-                                "description": "The domain of the complaint: 'infrastructure' (classroom benches, desks, doors, campus lifts, electricity, lab fixtures -> Estate Office), 'hostel' (hostel blocks, dorm rooms, hostel water supply -> Warden), 'mess' (food, dining, canteen -> Mess Committee), 'academic' (exams, grades, faculty, courses -> HOD), 'harassment' (safety, ragging, counseling -> Counseling Cell)."
+                                "description": "The domain of the complaint: 'infrastructure' (classroom benches, desks, doors, campus lifts, electricity, lab fixtures -> Estate Office), 'hostel' (hostel blocks, dorm rooms, hostel water supply -> Warden), 'mess' (food, dining, canteen -> Mess Committee), 'academic' (marks, semester, exam/tuition fees, grades, exams -> Exam Cell Admin), 'harassment' (safety, ragging, counseling -> Counseling Cell)."
                             },
                             "urgency": {
                                 "type": "string",
@@ -233,7 +235,7 @@ def classify_complaint(text: str) -> Dict[str, Any]:
                     "- 'infrastructure': Classrooms (e.g. C101, C405), benches, desks, chairs, tables, doors, windows, campus lifts, building power, lab equipment, electrical fixtures (assigned to Estate Office).\n"
                     "- 'hostel': Hostel residential blocks (e.g. H-block, hostel room), hostel water supply, warden matters, roommates (assigned to Warden).\n"
                     "- 'mess': Food quality, mess dining, unhygienic meals, catering, canteen (assigned to Mess Committee).\n"
-                    "- 'academic': Exams, grades, grading errors, faculty, classes, syllabus, attendance, schedule, timetable, CIA (assigned to HOD).\n"
+                    "- 'academic': Marks, semester exams, grading errors, exam fees, tuition fees, semester registration, hall tickets, revaluation, syllabus, attendance (assigned to Exam Cell Admin).\n"
                     "- 'harassment': Bullying, ragging, stalking, abuse, safety disclosures (assigned to Counseling Cell, urgency always high).\n"
                     "Allowed urgencies: 'low', 'medium', 'high'."
                 )
@@ -284,7 +286,7 @@ def classify_complaint(text: str) -> Dict[str, Any]:
                         "- 'infrastructure': classrooms, benches, desks, chairs, doors, campus lifts, electricity (Estate Office)\n"
                         "- 'hostel': residential blocks, hostel water, cleanliness, rooms (Warden)\n"
                         "- 'mess': food, meals, dining, catering (Mess Committee)\n"
-                        "- 'academic': exams, schedule, CIA, marks, faculty (HOD)\n"
+                        "- 'academic': marks, semester, exam fees, tuition fees, hall ticket, grades, exams (Exam Cell Admin)\n"
                         "- 'harassment': bullying, ragging, abuse, safety (Counseling Cell, urgency high)"
                     )
                 },

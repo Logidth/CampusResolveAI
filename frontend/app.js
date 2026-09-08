@@ -302,6 +302,7 @@ if (authLoggedOutView && authLoggedInView) {
   const AUTHORITY_EMAILS = {
     "Warden": "dlogidth4@gmail.com",
     "Mess Committee": "dlogidth5@gmail.com",
+    "Exam Cell Admin": "717824v101@kce.ac.in",
     "HOD": "717824v101@kce.ac.in",
     "Estate Office": "717824v134@kce.ac.in",
     "Dean of Student Affairs": "abijithmohanan2006@gmail.com",
@@ -317,107 +318,28 @@ if (authLoggedOutView && authLoggedInView) {
 
   // Check Auth State: Logged-in vs Logged-out
   if (!currentUser) {
-    // Show Sign-in Form + Quick Demo Picker
+    // Show Secure Sign-in Form
     authLoggedOutView.style.display = "block";
     authLoggedInView.style.display = "none";
-    initQuickDemoLogin();
+    initSecureLogin();
   } else {
-    // Show Full Authenticated Authority Dashboard
-    authLoggedOutView.style.display = "none";
-    authLoggedInView.style.display = "block";
-    initAuthorityDashboard();
+    // Check if user must change password before accessing dashboard
+    if (currentUser.must_change_password) {
+      authLoggedOutView.style.display = "none";
+      authLoggedInView.style.display = "none";
+      showFirstLoginModal(getAuthToken(), currentUser);
+    } else {
+      // Show Full Authenticated Authority Dashboard
+      authLoggedOutView.style.display = "none";
+      authLoggedInView.style.display = "block";
+      initAuthorityDashboard();
+    }
   }
 
   // -------------------------------------------------------------
-  // A. Quick Demo Login Initializer (Signed-out View)
+  // A. Enterprise Secure Sign-in Handler
   // -------------------------------------------------------------
-  async function initQuickDemoLogin() {
-    const roleIcons = {
-      "Warden": "🏢",
-      "Mess Committee": "🍲",
-      "HOD": "📚",
-      "Estate Office": "⚡",
-      "Dean of Student Affairs": "🎓",
-      "Dean of Academics": "📖",
-      "Vice Principal": "🏛️",
-      "Principal": "👑",
-      "Counseling Cell": "🛡️",
-      "Admin": "⚙️"
-    };
-
-    try {
-      const res = await fetch(`${API_BASE}/auth/accounts`);
-      if (!res.ok) throw new Error("Failed to load demo accounts");
-      const accounts = await res.json();
-
-      quickAccountsList.innerHTML = accounts.map(acc => {
-        const icon = roleIcons[acc.role] || "👤";
-        return `
-          <div class="quick-acc-card" onclick="quickLogin('${acc.username}', '${acc.password}')">
-            <div>
-              <div class="quick-acc-role">
-                <span>${icon}</span>
-                <span>${acc.full_name || acc.role}</span>
-              </div>
-              <div class="quick-acc-meta">
-                ${acc.role} &middot; <span style="color: var(--primary); font-family: var(--font-mono); font-weight: 600;">${acc.email}</span>
-              </div>
-            </div>
-            <span class="quick-acc-badge">
-              ${acc.username}
-            </span>
-          </div>
-        `;
-      }).join("");
-    } catch (e) {
-      console.warn("Backend connectivity issue:", e);
-      const fallbackAccounts = [
-        { username: "warden", password: "warden123", role: "Warden", full_name: "Prof. R. K. Sharma (Warden)", email: "dlogidth4@gmail.com" },
-        { username: "mess", password: "mess123", role: "Mess Committee", full_name: "Dr. Ananya Gupta (Mess Committee)", email: "dlogidth5@gmail.com" },
-        { username: "hod", password: "hod123", role: "HOD", full_name: "Dr. Vikram Malhotra (HOD)", email: "717824v101@kce.ac.in" },
-        { username: "estate", password: "estate123", role: "Estate Office", full_name: "Er. S. N. Roy (Estate Office)", email: "717824v134@kce.ac.in" },
-        { username: "counselor", password: "counselor123", role: "Counseling Cell", full_name: "Dr. Sunita Rao (Chief Counselor)", email: "717824v152@kce.ac.in" },
-        { username: "principal", password: "principal123", role: "Principal", full_name: "Dr. K. S. Pillai (Principal / Director)", email: "717824v27@kce.ac.in" },
-        { username: "admin", password: "admin123", role: "Admin", full_name: "Central Institutional Administrator", email: "717824v134@kce.ac.in" }
-      ];
-
-      quickAccountsList.innerHTML = `
-        <div style="background: rgba(239, 68, 68, 0.1); border: 1px solid rgba(239, 68, 68, 0.3); border-radius: 8px; padding: 0.75rem; margin-bottom: 0.75rem; font-size: 0.8rem; color: var(--danger);">
-          ⚠️ <strong>Backend Unreachable</strong> at <code>${API_BASE}</code>.<br>
-          <span style="color: var(--text-muted); font-size: 0.75rem;">
-            If running locally: start backend with <code>uvicorn backend.main:app --port 8000</code>.<br>
-            If using deployed backend: append <code>?api=https://your-service.onrender.com</code> to URL.
-          </span>
-        </div>
-      ` + fallbackAccounts.map(acc => {
-        const icon = roleIcons[acc.role] || "👤";
-        return `
-          <div class="quick-acc-card" onclick="quickLogin('${acc.username}', '${acc.password}')">
-            <div>
-              <div class="quick-acc-role">
-                <span>${icon}</span>
-                <span>${acc.full_name || acc.role}</span>
-              </div>
-              <div class="quick-acc-meta">
-                ${acc.role} &middot; <span style="color: var(--primary); font-family: var(--font-mono); font-weight: 600;">${acc.email}</span>
-              </div>
-            </div>
-            <span class="quick-acc-badge">
-              ${acc.username}
-            </span>
-          </div>
-        `;
-      }).join("");
-    }
-
-    // Quick Login Helper
-    window.quickLogin = function(username, password) {
-      document.getElementById("loginUsername").value = username;
-      document.getElementById("loginPassword").value = password;
-      executeLogin(username, password);
-    };
-
-    // Form submit handler
+  function initSecureLogin() {
     authLoginForm?.addEventListener("submit", (e) => {
       e.preventDefault();
       const u = document.getElementById("loginUsername").value.trim();
@@ -439,10 +361,16 @@ if (authLoggedOutView && authLoggedInView) {
           body: JSON.stringify({ username, password })
         });
         const data = await res.json();
-        if (!res.ok) throw new Error(data.detail || "Invalid credentials.");
+        if (!res.ok) throw new Error(data.detail || "Invalid credentials. Please verify your username and password.");
 
         setAuthSession(data.access_token, data.user);
-        window.location.reload();
+        
+        if (data.user.must_change_password) {
+          authLoggedOutView.style.display = "none";
+          showFirstLoginModal(data.access_token, data.user);
+        } else {
+          window.location.reload();
+        }
       } catch (err) {
         if (loginErrorAlert) {
           loginErrorAlert.innerText = err.message;
@@ -457,6 +385,76 @@ if (authLoggedOutView && authLoggedInView) {
         }
       }
     }
+  }
+
+  // First-Login Password Change Modal Controller
+  function showFirstLoginModal(token, user) {
+    const modal = document.getElementById("firstLoginModal");
+    if (!modal) return;
+    modal.style.display = "flex";
+
+    const form = document.getElementById("firstLoginForm");
+    const errBox = document.getElementById("firstLoginErrorAlert");
+    const submitBtn = document.getElementById("firstLoginSubmitBtn");
+
+    form?.addEventListener("submit", async (e) => {
+      e.preventDefault();
+      if (errBox) errBox.style.display = "none";
+
+      const p1 = document.getElementById("firstLoginNewPass").value.trim();
+      const p2 = document.getElementById("firstLoginConfirmPass").value.trim();
+
+      if (p1.length < 4) {
+        if (errBox) {
+          errBox.innerText = "Password must be at least 4 characters long.";
+          errBox.style.display = "block";
+        }
+        return;
+      }
+      if (p1 !== p2) {
+        if (errBox) {
+          errBox.innerText = "New passwords do not match. Please re-enter.";
+          errBox.style.display = "block";
+        }
+        return;
+      }
+
+      if (submitBtn) {
+        submitBtn.disabled = true;
+        submitBtn.innerText = "Saving New Password...";
+      }
+
+      try {
+        const res = await fetch(`${API_BASE}/auth/change-password`, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "Authorization": `Bearer ${token || getAuthToken()}`
+          },
+          body: JSON.stringify({ new_password: p1, confirm_password: p2 })
+        });
+        const resData = await res.json();
+        if (!res.ok) throw new Error(resData.detail || "Failed to update password.");
+
+        alert("✅ Password established successfully! Welcome to your authority dashboard.");
+        user.must_change_password = false;
+        setAuthSession(token || getAuthToken(), user);
+        modal.style.display = "none";
+        window.location.reload();
+      } catch (err) {
+        if (errBox) {
+          errBox.innerText = err.message;
+          errBox.style.display = "block";
+        } else {
+          alert(err.message);
+        }
+      } finally {
+        if (submitBtn) {
+          submitBtn.disabled = false;
+          submitBtn.innerText = "Save Password & Continue";
+        }
+      }
+    });
   }
 
   // -------------------------------------------------------------
@@ -499,11 +497,9 @@ if (authLoggedOutView && authLoggedInView) {
       }
     } else if (currentUser.role === "Admin") {
       currentAuthority = "All";
-      if (authoritySelector) {
-        authoritySelector.value = "All";
-        authoritySelector.disabled = false;
-      }
       if (tabCounselorBtn) tabCounselorBtn.style.display = "inline-block";
+      const adminBtn = document.getElementById("adminPortalBtn");
+      if (adminBtn) adminBtn.style.display = "inline-block";
     } else if (currentUser.assigned_authority) {
       currentAuthority = currentUser.assigned_authority;
       if (authoritySelector) {
@@ -935,4 +931,251 @@ if (authLoggedOutView && authLoggedInView) {
   showOnlyOpenCheckbox?.addEventListener("change", () => {
     loadDashboardComplaints();
   });
+}
+
+// =======================================================
+// D. Central Admin Console (admin.html)
+// =======================================================
+const adminUsersTableBody = document.getElementById("adminUsersTableBody");
+if (adminUsersTableBody) {
+  const currentAdminUser = getAuthUser();
+  const deniedBox = document.getElementById("adminAccessDeniedAlert");
+  const contentBox = document.getElementById("adminMainContent");
+
+  if (!currentAdminUser || currentAdminUser.role !== "Admin") {
+    if (deniedBox) deniedBox.style.display = "block";
+    if (contentBox) contentBox.style.display = "none";
+  } else {
+    if (deniedBox) deniedBox.style.display = "none";
+    if (contentBox) contentBox.style.display = "block";
+    initAdminConsole();
+  }
+
+  function initAdminConsole() {
+    const logoutBtn = document.getElementById("adminLogoutBtn");
+    if (logoutBtn) logoutBtn.onclick = handleGlobalLogout;
+
+    const refreshBtn = document.getElementById("btnRefreshUsers");
+    if (refreshBtn) refreshBtn.onclick = loadAdminUsers;
+
+    // Modals
+    const addModal = document.getElementById("addUserModal");
+    const openAddModalBtn = document.getElementById("btnOpenAddUserModal");
+    const closeAddModalBtn = document.getElementById("closeAddUserModal");
+    const cancelAddBtn = document.getElementById("cancelAddUserBtn");
+    const addUserForm = document.getElementById("addUserForm");
+    const addUserErr = document.getElementById("addUserError");
+
+    openAddModalBtn?.addEventListener("click", () => {
+      if (addUserErr) addUserErr.style.display = "none";
+      addUserForm?.reset();
+      const cb = document.getElementById("newMustChangePass");
+      if (cb) cb.checked = true;
+      if (addModal) addModal.style.display = "flex";
+    });
+
+    const closeAdd = () => { if (addModal) addModal.style.display = "none"; };
+    closeAddModalBtn?.addEventListener("click", closeAdd);
+    cancelAddBtn?.addEventListener("click", closeAdd);
+
+    addUserForm?.addEventListener("submit", async (e) => {
+      e.preventDefault();
+      if (addUserErr) addUserErr.style.display = "none";
+
+      const username = document.getElementById("newUsername").value.trim();
+      const password = document.getElementById("newPassword").value.trim();
+      const full_name = document.getElementById("newFullName").value.trim();
+      const role = document.getElementById("newRole").value;
+      const email = document.getElementById("newEmail").value.trim();
+      const tier = document.getElementById("newTier").value.trim();
+      const must_change_password = document.getElementById("newMustChangePass").checked;
+
+      const submitBtn = document.getElementById("submitAddUserBtn");
+      if (submitBtn) { submitBtn.disabled = true; submitBtn.innerText = "Creating..."; }
+
+      try {
+        const res = await fetch(`${API_BASE}/admin/users`, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "Authorization": `Bearer ${getAuthToken()}`
+          },
+          body: JSON.stringify({
+            username,
+            password,
+            full_name,
+            role,
+            assigned_authority: role,
+            email,
+            tier: tier || undefined,
+            must_change_password
+          })
+        });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.detail || "Failed to create authority account");
+
+        alert(`✅ Authority account '${data.username}' created successfully!`);
+        closeAdd();
+        loadAdminUsers();
+      } catch (err) {
+        if (addUserErr) {
+          addUserErr.innerText = err.message;
+          addUserErr.style.display = "block";
+        } else {
+          alert(err.message);
+        }
+      } finally {
+        if (submitBtn) { submitBtn.disabled = false; submitBtn.innerText = "Create Authority"; }
+      }
+    });
+
+    // Reset Password Modal
+    const resetModal = document.getElementById("resetPasswordModal");
+    const closeResetModal = document.getElementById("closeResetModal");
+    const cancelResetBtn = document.getElementById("cancelResetBtn");
+    const resetPasswordForm = document.getElementById("resetPasswordForm");
+
+    const closeReset = () => { if (resetModal) resetModal.style.display = "none"; };
+    closeResetModal?.addEventListener("click", closeReset);
+    cancelResetBtn?.addEventListener("click", closeReset);
+
+    resetPasswordForm?.addEventListener("submit", async (e) => {
+      e.preventDefault();
+      const uid = document.getElementById("resetUserId").value;
+      const new_password = document.getElementById("resetNewPass").value.trim();
+      const must_change_password = document.getElementById("resetMustChange").checked;
+
+      try {
+        const res = await fetch(`${API_BASE}/admin/users/${uid}/reset-password`, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "Authorization": `Bearer ${getAuthToken()}`
+          },
+          body: JSON.stringify({ new_password, must_change_password })
+        });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.detail || "Failed to reset password");
+
+        alert(`✅ ${data.message}`);
+        closeReset();
+        loadAdminUsers();
+      } catch (err) {
+        alert("Reset Error: " + err.message);
+      }
+    });
+
+    // Role select auto-suggest email & tier
+    const roleSelect = document.getElementById("newRole");
+    roleSelect?.addEventListener("change", (e) => {
+      const val = e.target.value;
+      const tierInput = document.getElementById("newTier");
+      const emailInput = document.getElementById("newEmail");
+      if (val === "Exam Cell Admin") {
+        if (tierInput) tierInput.value = "Tier 1 — Operational (Marks, Semester & Fees)";
+        if (emailInput && !emailInput.value) emailInput.value = "717824v101@kce.ac.in";
+      } else if (val === "Warden") {
+        if (tierInput) tierInput.value = "Tier 1 — Operational (Hostels)";
+        if (emailInput && !emailInput.value) emailInput.value = "dlogidth4@gmail.com";
+      } else if (val === "Mess Committee") {
+        if (tierInput) tierInput.value = "Tier 1 — Operational (Dining & Catering)";
+        if (emailInput && !emailInput.value) emailInput.value = "dlogidth5@gmail.com";
+      } else if (val === "Estate Office") {
+        if (tierInput) tierInput.value = "Tier 1 — Operational (Campus Facilities)";
+        if (emailInput && !emailInput.value) emailInput.value = "717824v134@kce.ac.in";
+      } else if (val.includes("Dean")) {
+        if (tierInput) tierInput.value = "Tier 2 — Executive Oversight";
+      } else if (val === "Principal") {
+        if (tierInput) tierInput.value = "Tier 3 — Apex Institutional Authority";
+        if (emailInput && !emailInput.value) emailInput.value = "717824v27@kce.ac.in";
+      } else if (val === "Counseling Cell") {
+        if (tierInput) tierInput.value = "Protected — Student Safety & Wellness";
+        if (emailInput && !emailInput.value) emailInput.value = "717824v152@kce.ac.in";
+      }
+    });
+
+    loadAdminUsers();
+  }
+
+  async function loadAdminUsers() {
+    try {
+      const res = await fetch(`${API_BASE}/admin/users`, {
+        headers: { "Authorization": `Bearer ${getAuthToken()}` }
+      });
+      if (!res.ok) throw new Error("Failed to load authority directory");
+      const users = await res.json();
+
+      const totalEl = document.getElementById("statTotalUsers");
+      const pendingEl = document.getElementById("statPendingLogins");
+      if (totalEl) totalEl.innerText = users.length;
+      if (pendingEl) pendingEl.innerText = users.filter(u => u.must_change_password).length;
+
+      if (users.length === 0) {
+        adminUsersTableBody.innerHTML = `<tr><td colspan="6" style="text-align:center; padding:2rem; color:var(--text-muted);">No authorities found.</td></tr>`;
+        return;
+      }
+
+      adminUsersTableBody.innerHTML = users.map(u => {
+        const isSelf = u.username === "logi";
+        const statusBadge = u.must_change_password
+          ? `<span class="badge" style="background:#fef3c7; color:#d97706; border:1px solid #fde68a;">⚠️ Change Required</span>`
+          : `<span class="badge" style="background:#ecfdf5; color:#047857; border:1px solid #a7f3d0;">✓ Secured</span>`;
+
+        return `
+          <tr>
+            <td>
+              <div style="font-weight:700; color:var(--text-main); font-size:0.95rem;">${u.full_name}</div>
+              <code style="font-size:0.8rem; color:var(--primary); font-family:var(--font-mono); font-weight:600;">@${u.username}</code>
+            </td>
+            <td>
+              <span class="badge" style="background:#eff6ff; color:#1d4ed8; font-weight:600;">${u.role}</span>
+              ${u.assigned_authority && u.assigned_authority !== u.role ? `<div style="font-size:0.75rem; color:var(--text-muted); margin-top:2px;">${u.assigned_authority}</div>` : ''}
+            </td>
+            <td>
+              <span style="font-family:var(--font-mono); font-size:0.825rem; color:var(--text-main);">${u.email}</span>
+            </td>
+            <td>
+              <span style="font-size:0.8rem; color:var(--text-muted);">${u.tier || 'Authority Tier'}</span>
+            </td>
+            <td>${statusBadge}</td>
+            <td style="text-align:right; white-space:nowrap;">
+              <button onclick="openResetPasswordModal(${u.id}, '${u.username}')" class="btn btn-outline btn-sm" title="Reset temporary password for this authority">🔑 Reset</button>
+              ${!isSelf ? `<button onclick="adminDeleteUser(${u.id}, '${u.username}')" class="btn btn-sm" title="Delete authority account" style="background:#fee2e2; color:#b91c1c; border:1px solid #fca5a5; margin-left:4px;">🗑️ Delete</button>` : ''}
+            </td>
+          </tr>
+        `;
+      }).join("");
+
+    } catch (err) {
+      adminUsersTableBody.innerHTML = `<tr><td colspan="6" style="text-align:center; color:var(--danger); padding:2rem;">Error: ${err.message}</td></tr>`;
+    }
+  }
+
+  window.openResetPasswordModal = function(userId, username) {
+    document.getElementById("resetUserId").value = userId;
+    const sub = document.getElementById("resetModalSubtitle");
+    if (sub) sub.innerText = `Setting new temporary credentials for @${username}.`;
+    document.getElementById("resetNewPass").value = "";
+    document.getElementById("resetMustChange").checked = true;
+    const modal = document.getElementById("resetPasswordModal");
+    if (modal) modal.style.display = "flex";
+  };
+
+  window.adminDeleteUser = async function(userId, username) {
+    if (!confirm(`Are you sure you want to delete authority account '@${username}'?\n\nThis will remove their portal access permanently.`)) {
+      return;
+    }
+    try {
+      const res = await fetch(`${API_BASE}/admin/users/${userId}`, {
+        method: "DELETE",
+        headers: { "Authorization": `Bearer ${getAuthToken()}` }
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.detail || "Failed to delete user");
+      alert(`✅ ${data.message}`);
+      loadAdminUsers();
+    } catch (err) {
+      alert("Delete Error: " + err.message);
+    }
+  };
 }

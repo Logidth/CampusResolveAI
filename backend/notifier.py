@@ -37,6 +37,11 @@ AUTHORITY_DIRECTORY = {
         "email": os.getenv("EMAIL_MESS", "dlogidth5@gmail.com"),
         "tier": "Tier 1 — Operational (Dining & Catering)"
     },
+    "Exam Cell Admin": {
+        "name": "Examination & Fee Administration Cell",
+        "email": os.getenv("EMAIL_EXAM_CELL", "717824v101@kce.ac.in"),
+        "tier": "Tier 1 — Operational (Marks, Semester & Fees)"
+    },
     "HOD": {
         "name": "Head of Department (Academic)",
         "email": os.getenv("EMAIL_HOD", "717824v101@kce.ac.in"),

@@ -24,8 +24,10 @@ from backend.notifier import (
 )
 from backend.auth import (
     verify_password,
+    hash_password,
     create_session_token,
     get_current_user,
+    require_admin_user,
     get_optional_user,
     seed_authority_users,
     DEFAULT_ACCOUNTS,
@@ -87,7 +89,9 @@ app.mount("/app", StaticFiles(directory="frontend", html=True), name="frontend")
 AUTHORITY_MAP = {
     "hostel": "Warden",
     "mess": "Mess Committee",
-    "academic": "HOD",
+    "academic": "Exam Cell Admin",
+    "exam": "Exam Cell Admin",
+    "fees": "Exam Cell Admin",
     "infrastructure": "Estate Office",
     "harassment": "Counseling Cell",
 }
@@ -155,6 +159,7 @@ class UserProfileOut(BaseModel):
     role: str
     assigned_authority: Optional[str] = None
     tier: Optional[str] = None
+    must_change_password: bool = False
 
     class Config:
         from_attributes = True
@@ -166,6 +171,28 @@ class LoginResponse(BaseModel):
     user: UserProfileOut
 
 
+class ChangePasswordRequest(BaseModel):
+    current_password: Optional[str] = None
+    new_password: str
+    confirm_password: Optional[str] = None
+
+
+class AdminCreateUserRequest(BaseModel):
+    username: str
+    password: str
+    full_name: str
+    role: str
+    assigned_authority: Optional[str] = None
+    email: str
+    tier: Optional[str] = None
+    must_change_password: bool = True
+
+
+class AdminResetPasswordRequest(BaseModel):
+    new_password: str
+    must_change_password: bool = True
+
+
 class DemoAccountItem(BaseModel):
     username: str
     password: str
@@ -174,6 +201,7 @@ class DemoAccountItem(BaseModel):
     role: str
     assigned_authority: Optional[str] = None
     tier: Optional[str] = None
+    must_change_password: bool = False
 
 
 # --- Endpoints ---
@@ -235,9 +263,113 @@ def get_current_user_profile(current_user: User = Depends(get_current_user)):
     return current_user
 
 
+@app.post("/auth/change-password")
+def change_password(
+    payload: ChangePasswordRequest,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """Allows an authenticated authority to change their password and clears must_change_password flag."""
+    new_pw = payload.new_password.strip()
+    if len(new_pw) < 4:
+        raise HTTPException(status_code=400, detail="Password must be at least 4 characters long.")
+    if payload.confirm_password and new_pw != payload.confirm_password.strip():
+        raise HTTPException(status_code=400, detail="New passwords do not match.")
+
+    if payload.current_password and not verify_password(payload.current_password, current_user.hashed_password):
+        raise HTTPException(status_code=400, detail="Current password is incorrect.")
+
+    current_user.hashed_password = hash_password(new_pw)
+    current_user.must_change_password = False
+    db.commit()
+    db.refresh(current_user)
+
+    for token, sess in ACTIVE_SESSIONS.items():
+        if sess.get("user_id") == current_user.id:
+            sess["must_change_password"] = False
+
+    return {
+        "message": "Password changed successfully.",
+        "must_change_password": False,
+        "user": current_user
+    }
+
+
+# =====================================================================
+# Central Admin Management Endpoints (Requires 'Admin' Role)
+# =====================================================================
+
+@app.get("/admin/users", response_model=List[UserProfileOut])
+def admin_list_users(admin: User = Depends(require_admin_user), db: Session = Depends(get_db)):
+    """Admin-only: Retrieve all registered authority user accounts."""
+    return db.query(User).order_by(User.id.asc()).all()
+
+
+@app.post("/admin/users", response_model=UserProfileOut, status_code=201)
+def admin_create_user(payload: AdminCreateUserRequest, admin: User = Depends(require_admin_user), db: Session = Depends(get_db)):
+    """Admin-only: Register a new authority account."""
+    username_clean = payload.username.strip().lower()
+    if not username_clean:
+        raise HTTPException(status_code=400, detail="Username is required.")
+    if len(payload.password.strip()) < 4:
+        raise HTTPException(status_code=400, detail="Password must be at least 4 characters long.")
+
+    existing = db.query(User).filter(User.username.ilike(username_clean)).first()
+    if existing:
+        raise HTTPException(status_code=400, detail=f"Username '{payload.username}' is already registered.")
+
+    new_user = User(
+        username=username_clean,
+        email=payload.email.strip(),
+        hashed_password=hash_password(payload.password.strip()),
+        full_name=payload.full_name.strip(),
+        role=payload.role.strip(),
+        assigned_authority=payload.assigned_authority.strip() if payload.assigned_authority else payload.role.strip(),
+        tier=payload.tier.strip() if payload.tier else "Operational Authority",
+        must_change_password=payload.must_change_password,
+        created_at=datetime.utcnow(),
+    )
+    db.add(new_user)
+    db.commit()
+    db.refresh(new_user)
+    return new_user
+
+
+@app.delete("/admin/users/{user_id}")
+def admin_delete_user(user_id: int, admin: User = Depends(require_admin_user), db: Session = Depends(get_db)):
+    """Admin-only: Delete an authority account (cannot delete self)."""
+    if user_id == admin.id:
+        raise HTTPException(status_code=400, detail="Cannot delete your own active administrator account.")
+    target_user = db.query(User).filter(User.id == user_id).first()
+    if not target_user:
+        raise HTTPException(status_code=404, detail="User account not found.")
+    
+    uname = target_user.username
+    db.delete(target_user)
+    db.commit()
+    return {"message": f"Authority account '{uname}' has been deleted successfully."}
+
+
+@app.post("/admin/users/{user_id}/reset-password")
+def admin_reset_password(user_id: int, payload: AdminResetPasswordRequest, admin: User = Depends(require_admin_user), db: Session = Depends(get_db)):
+    """Admin-only: Reset password for an authority and set first-login password change flag."""
+    target_user = db.query(User).filter(User.id == user_id).first()
+    if not target_user:
+        raise HTTPException(status_code=404, detail="User account not found.")
+    if len(payload.new_password.strip()) < 4:
+        raise HTTPException(status_code=400, detail="Password must be at least 4 characters long.")
+
+    target_user.hashed_password = hash_password(payload.new_password.strip())
+    target_user.must_change_password = payload.must_change_password
+    db.commit()
+    return {
+        "message": f"Password reset for '{target_user.username}'. First-login change required: {target_user.must_change_password}."
+    }
+
+
 @app.get("/auth/accounts", response_model=List[DemoAccountItem])
 def list_demo_accounts():
-    """List pre-configured demo authority login credentials for evaluation and quick-login."""
+    """List pre-configured authority login credentials."""
     return DEFAULT_ACCOUNTS
 
 

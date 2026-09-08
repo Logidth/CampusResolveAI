@@ -1,0 +1,297 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>CampusResolve — Central Admin Console</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="style.css">
+  <script src="config.js"></script>
+  <style>
+    .admin-header-card {
+      background: linear-gradient(135deg, #1e293b 0%, #0f172a 100%);
+      color: #ffffff;
+      border-radius: var(--radius-lg);
+      padding: 2rem;
+      margin-bottom: 2rem;
+      box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.2);
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      flex-wrap: wrap;
+      gap: 1.5rem;
+    }
+    .admin-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.35rem;
+      padding: 0.35rem 0.85rem;
+      border-radius: 9999px;
+      font-size: 0.75rem;
+      font-weight: 700;
+      letter-spacing: 0.05em;
+      text-transform: uppercase;
+      background: rgba(59, 130, 246, 0.2);
+      border: 1px solid rgba(96, 165, 250, 0.4);
+      color: #93c5fd;
+    }
+    .stat-pill {
+      background: rgba(255, 255, 255, 0.08);
+      border: 1px solid rgba(255, 255, 255, 0.12);
+      border-radius: var(--radius-md);
+      padding: 1rem 1.25rem;
+      min-width: 140px;
+    }
+    .stat-pill-val {
+      font-size: 1.6rem;
+      font-weight: 700;
+      color: #fff;
+    }
+    .stat-pill-lbl {
+      font-size: 0.75rem;
+      color: #94a3b8;
+      text-transform: uppercase;
+      font-weight: 600;
+      letter-spacing: 0.04em;
+    }
+    .modal-overlay {
+      position: fixed;
+      top: 0; left: 0; right: 0; bottom: 0;
+      background: rgba(15, 23, 42, 0.75);
+      backdrop-filter: blur(4px);
+      z-index: 9999;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 1.5rem;
+    }
+    .modal-card {
+      background: var(--bg-card);
+      border: 1px solid var(--border-color);
+      border-radius: var(--radius-lg);
+      padding: 2.25rem;
+      max-width: 520px;
+      width: 100%;
+      box-shadow: var(--shadow-lg);
+    }
+  </style>
+</head>
+<body>
+
+  <!-- Top Navigation Bar -->
+  <header class="navbar">
+    <div class="container nav-content">
+      <a href="index.html" class="brand">
+        <div class="logo-icon">CR</div>
+        <span>CampusResolve</span>
+      </a>
+      <nav class="nav-links">
+        <a href="index.html" class="nav-link">🎓 Student Portal</a>
+        <a href="dashboard.html" class="nav-link">📋 Complaints Queue</a>
+        <a href="admin.html" class="nav-link active">⚙️ Admin Console</a>
+      </nav>
+    </div>
+  </header>
+
+  <main class="container" style="padding-top: 2rem; padding-bottom: 3rem;">
+
+    <!-- Access Denied Alert (if unauthorized) -->
+    <div id="adminAccessDeniedAlert" style="display: none; background: #fef2f2; border: 1px solid #fecaca; border-radius: var(--radius-md); padding: 2rem; text-align: center; max-width: 540px; margin: 3rem auto;">
+      <div style="font-size: 3rem; margin-bottom: 0.5rem;">🔒</div>
+      <h2 style="color: #dc2626; font-weight: 700; margin-bottom: 0.5rem;">Administrator Privileges Required</h2>
+      <p style="color: #475569; font-size: 0.9rem; margin-bottom: 1.5rem;">
+        This portal is strictly reserved for the Central Institutional Administrator (<code>logi</code>). Please sign in with administrator credentials to manage authority accounts.
+      </p>
+      <a href="dashboard.html" class="btn btn-primary">Go to Authority Sign In</a>
+    </div>
+
+    <!-- Authenticated Admin Content View -->
+    <div id="adminMainContent" style="display: none;">
+
+      <!-- Admin Identity & Overview Banner -->
+      <div class="admin-header-card">
+        <div>
+          <div class="admin-badge">
+            ⚡ Central Authority Directory Management
+          </div>
+          <h1 style="font-size: 1.8rem; font-weight: 800; margin: 0.5rem 0 0.25rem 0; letter-spacing: -0.02em;">
+            Welcome, Administrator Logi
+          </h1>
+          <p style="color: #94a3b8; font-size: 0.9rem; max-width: 580px; margin: 0;">
+            Provision, manage, and audit university authority user accounts across operational, executive oversight, and apex institutional tiers.
+          </p>
+        </div>
+
+        <div style="display: flex; gap: 0.75rem; flex-wrap: wrap;">
+          <div class="stat-pill">
+            <div id="statTotalUsers" class="stat-pill-val">0</div>
+            <div class="stat-pill-lbl">Total Accounts</div>
+          </div>
+          <div class="stat-pill">
+            <div id="statPendingLogins" class="stat-pill-val" style="color: #fbbf24;">0</div>
+            <div class="stat-pill-lbl">1st-Login Pending</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Action Toolbar -->
+      <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 1rem; margin-bottom: 1.5rem;">
+        <div>
+          <h2 style="font-size: 1.25rem; font-weight: 700; color: var(--text-main); margin-bottom: 0.25rem;">
+            Registered Authority Directory
+          </h2>
+          <p style="font-size: 0.85rem; color: var(--text-muted); margin: 0;">
+            Authorities manage grievances, execute resolutions, and receive autonomous SLA escalation alerts.
+          </p>
+        </div>
+
+        <div style="display: flex; align-items: center; gap: 0.5rem;">
+          <button id="btnRefreshUsers" class="btn btn-outline btn-sm">🔄 Refresh Directory</button>
+          <button id="btnOpenAddUserModal" class="btn btn-primary btn-sm">➕ Add New Authority</button>
+          <button id="adminLogoutBtn" class="btn btn-outline btn-sm" style="color: var(--danger); border-color: var(--danger-border);">🚪 Sign Out</button>
+        </div>
+      </div>
+
+      <!-- Authorities Table Card -->
+      <div style="background: var(--bg-card); border: 1px solid var(--border-color); border-radius: var(--radius-lg); overflow: hidden; box-shadow: var(--shadow-sm);">
+        <div style="overflow-x: auto;">
+          <table class="table" style="margin: 0; width: 100%;">
+            <thead>
+              <tr>
+                <th>Authority User</th>
+                <th>Role / Jurisdiction</th>
+                <th>Official Email</th>
+                <th>Escalation Tier</th>
+                <th>First-Login Status</th>
+                <th style="text-align: right;">Management Actions</th>
+              </tr>
+            </thead>
+            <tbody id="adminUsersTableBody">
+              <tr>
+                <td colspan="6" style="text-align: center; padding: 2.5rem; color: var(--text-muted);">
+                  Loading registered authorities...
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+    </div>
+
+  </main>
+
+  <!-- ======================================================= -->
+  <!-- MODAL: ADD NEW AUTHORITY -->
+  <!-- ======================================================= -->
+  <div id="addUserModal" class="modal-overlay" style="display: none;">
+    <div class="modal-card">
+      <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1.25rem;">
+        <h2 style="font-size: 1.25rem; font-weight: 700; color: var(--text-main); margin: 0;">
+          ➕ Add University Authority
+        </h2>
+        <button id="closeAddUserModal" style="background: none; border: none; font-size: 1.5rem; color: var(--text-muted); cursor: pointer;">&times;</button>
+      </div>
+
+      <div id="addUserError" style="display: none; background: #fef2f2; border: 1px solid #fecaca; color: #dc2626; padding: 0.65rem 0.85rem; border-radius: var(--radius-sm); font-size: 0.825rem; margin-bottom: 1rem;"></div>
+
+      <form id="addUserForm">
+        <div class="form-group">
+          <label for="newUsername">Username <span style="color: var(--danger);">*</span></label>
+          <input type="text" id="newUsername" class="form-control" placeholder="e.g. exam_cell, warden_block_b" required>
+        </div>
+
+        <div class="form-group">
+          <label for="newPassword">Initial Password <span style="color: var(--danger);">*</span></label>
+          <input type="password" id="newPassword" class="form-control" placeholder="Minimum 4 characters" required minlength="4">
+        </div>
+
+        <div class="form-group">
+          <label for="newFullName">Full Name / Official Designation <span style="color: var(--danger);">*</span></label>
+          <input type="text" id="newFullName" class="form-control" placeholder="e.g. Dr. Rajesh Kumar (Exam Cell Admin)" required>
+        </div>
+
+        <div class="form-group">
+          <label for="newRole">Role & Jurisdiction <span style="color: var(--danger);">*</span></label>
+          <select id="newRole" class="form-control" required>
+            <option value="Exam Cell Admin">Exam Cell Admin (Marks, Semester & Fees)</option>
+            <option value="Warden">Warden (Hostels & Accommodation)</option>
+            <option value="Mess Committee">Mess Committee (Dining & Catering)</option>
+            <option value="Estate Office">Estate Office (Campus Infrastructure)</option>
+            <option value="Dean of Student Affairs">Dean of Student Affairs (Tier 2 Oversight)</option>
+            <option value="Dean of Academics">Dean of Academics (Tier 2 Oversight)</option>
+            <option value="Vice Principal">Vice Principal (Tier 2 Oversight)</option>
+            <option value="Principal">Principal (Tier 3 Apex Authority)</option>
+            <option value="Counseling Cell">Counseling Cell (Protected / Safety)</option>
+            <option value="Admin">Central Administrator</option>
+          </select>
+        </div>
+
+        <div class="form-group">
+          <label for="newEmail">Official Delivery Email <span style="color: var(--danger);">*</span></label>
+          <input type="email" id="newEmail" class="form-control" placeholder="official@kce.ac.in or gmail.com" required>
+        </div>
+
+        <div class="form-group">
+          <label for="newTier">Escalation Tier Label</label>
+          <input type="text" id="newTier" class="form-control" placeholder="Tier 1 — Operational (Marks, Semester & Fees)">
+        </div>
+
+        <div style="display: flex; align-items: center; gap: 0.5rem; margin-bottom: 1.5rem;">
+          <input type="checkbox" id="newMustChangePass" checked style="width: 16px; height: 16px; accent-color: var(--primary);">
+          <label for="newMustChangePass" style="font-size: 0.85rem; color: var(--text-main); font-weight: 500; margin: 0; cursor: pointer;">
+            Require password change on first login
+          </label>
+        </div>
+
+        <div style="display: flex; justify-content: flex-end; gap: 0.5rem;">
+          <button type="button" id="cancelAddUserBtn" class="btn btn-outline">Cancel</button>
+          <button type="submit" id="submitAddUserBtn" class="btn btn-primary">Create Authority</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- ======================================================= -->
+  <!-- MODAL: RESET PASSWORD -->
+  <!-- ======================================================= -->
+  <div id="resetPasswordModal" class="modal-overlay" style="display: none;">
+    <div class="modal-card">
+      <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1.25rem;">
+        <h2 style="font-size: 1.25rem; font-weight: 700; color: var(--text-main); margin: 0;">
+          🔑 Reset Authority Password
+        </h2>
+        <button id="closeResetModal" style="background: none; border: none; font-size: 1.5rem; color: var(--text-muted); cursor: pointer;">&times;</button>
+      </div>
+
+      <p id="resetModalSubtitle" style="font-size: 0.85rem; color: var(--text-muted); margin-bottom: 1rem;">
+        Setting a new temporary password for user.
+      </p>
+
+      <form id="resetPasswordForm">
+        <input type="hidden" id="resetUserId">
+        <div class="form-group">
+          <label for="resetNewPass">New Temporary Password</label>
+          <input type="password" id="resetNewPass" class="form-control" placeholder="Minimum 4 characters" required minlength="4">
+        </div>
+
+        <div style="display: flex; align-items: center; gap: 0.5rem; margin-bottom: 1.5rem;">
+          <input type="checkbox" id="resetMustChange" checked style="width: 16px; height: 16px; accent-color: var(--primary);">
+          <label for="resetMustChange" style="font-size: 0.85rem; color: var(--text-main); font-weight: 500; margin: 0; cursor: pointer;">
+            Require authority to change password on next sign-in
+          </label>
+        </div>
+
+        <div style="display: flex; justify-content: flex-end; gap: 0.5rem;">
+          <button type="button" id="cancelResetBtn" class="btn btn-outline">Cancel</button>
+          <button type="submit" class="btn btn-primary">Save Reset Password</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <script src="app.js"></script>
+</body>
+</html>

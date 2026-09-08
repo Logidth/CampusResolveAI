@@ -93,7 +93,7 @@ def test_full_auth_and_credentials_suite():
     print(f"   [PASS] GET /auth/accounts returned {len(account_list)} demo credentials.")
 
     # Test Logout
-    admin_token = tokens["admin"]
+    admin_token = tokens.get("logi") or tokens.get("admin")
     res_logout = client.post("/auth/logout", headers={"Authorization": f"Bearer {admin_token}"})
     assert res_logout.status_code == 200
     print("   [PASS] POST /auth/logout terminated session.")

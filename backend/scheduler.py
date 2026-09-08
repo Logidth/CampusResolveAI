@@ -20,11 +20,12 @@ logger = logging.getLogger("CampusResolveScheduler")
 # Tiered Escalation Hierarchy
 # Warden ➔ Dean of Student Affairs ➔ Principal
 # Mess Committee ➔ Dean of Student Affairs ➔ Principal
-# HOD ➔ Dean of Academics ➔ Principal
+# Exam Cell Admin ➔ Dean of Academics ➔ Principal
 # Estate Office ➔ Vice Principal ➔ Principal
 ESCALATION_TIERS = {
     "Warden": "Dean of Student Affairs",
     "Mess Committee": "Dean of Student Affairs",
+    "Exam Cell Admin": "Dean of Academics",
     "HOD": "Dean of Academics",
     "Estate Office": "Vice Principal",
     "Dean of Student Affairs": "Principal",

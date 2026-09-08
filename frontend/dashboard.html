@@ -30,75 +30,90 @@
     <!-- ======================================================= -->
     <!-- VIEW A: SIGN-IN SCREEN (Visible when user is NOT logged in) -->
     <!-- ======================================================= -->
-    <div id="authLoggedOutView" style="display: none;">
-      <div class="auth-container">
-        <!-- Left Column: Credentials Form -->
-        <div class="auth-box">
-          <div style="margin-bottom: 1.5rem;">
-            <div class="badge badge-open" style="font-size: 0.75rem; margin-bottom: 0.5rem;">
-              🔐 University Authority Access
-            </div>
-            <h1 style="font-size: 1.5rem; font-weight: 700; color: var(--text-main); margin-bottom: 0.35rem;">
-              Authority Sign In
-            </h1>
-            <p style="color: var(--text-muted); font-size: 0.85rem;">
-              Sign in to manage complaints routed to your jurisdiction, review SLA escalations, and dispatch resolution remarks.
-            </p>
+    <!-- ======================================================= -->
+    <!-- VIEW A: SIGN-IN SCREEN (Visible when user is NOT logged in) -->
+    <!-- ======================================================= -->
+    <div id="authLoggedOutView" style="display: none; padding: 2rem 0;">
+      <div style="max-width: 440px; margin: 0 auto; background: var(--bg-card); border: 1px solid var(--border-color); border-radius: var(--radius-lg); padding: 2.25rem; box-shadow: var(--shadow-md);">
+        <div style="margin-bottom: 1.5rem; text-align: center;">
+          <div class="badge badge-open" style="font-size: 0.75rem; margin-bottom: 0.5rem;">
+            🔐 University Authority Access
           </div>
-
-          <div id="loginErrorAlert" style="display: none; background: #fef2f2; border: 1px solid #fecaca; color: #dc2626; padding: 0.75rem 1rem; border-radius: var(--radius-sm); font-size: 0.85rem; margin-bottom: 1.25rem;">
-          </div>
-
-          <form id="authLoginForm">
-            <div class="form-group">
-              <label for="loginUsername">Username or Official Email</label>
-              <input 
-                type="text" 
-                id="loginUsername" 
-                class="form-control" 
-                placeholder="e.g. warden, dean_student, principal, counselor" 
-                required>
-            </div>
-
-            <div class="form-group">
-              <label for="loginPassword">Password</label>
-              <input 
-                type="password" 
-                id="loginPassword" 
-                class="form-control" 
-                placeholder="Enter password" 
-                required>
-            </div>
-
-            <button type="submit" id="loginSubmitBtn" class="btn btn-primary btn-full" style="margin-top: 0.5rem;">
-              Sign In to Authority Dashboard
-            </button>
-          </form>
-
-          <div style="margin-top: 1.5rem; padding-top: 1.25rem; border-top: 1px solid var(--border-color); font-size: 0.8rem; color: var(--text-muted); text-align: center;">
-            Need to file a complaint instead? <a href="index.html" style="color: var(--primary); font-weight: 600; text-decoration: none;">Go to Student Portal</a>
-          </div>
-        </div>
-
-        <!-- Right Column: 1-Click Quick Demo Login Picker -->
-        <div class="quick-accounts-section">
-          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.5rem;">
-            <h2 style="font-size: 1.05rem; font-weight: 700; color: var(--text-main);">
-              ⚡ 1-Click Authority Demo Login
-            </h2>
-            <span class="badge" style="background: #e0f2fe; color: #0284c7; font-size: 0.7rem;">Live Directory</span>
-          </div>
-          <p style="color: var(--text-muted); font-size: 0.785rem; margin-bottom: 0.75rem;">
-            Click any authority below to instantly log in and access their role-locked dashboard:
+          <h1 style="font-size: 1.5rem; font-weight: 700; color: var(--text-main); margin-bottom: 0.35rem;">
+            Authority Sign In
+          </h1>
+          <p style="color: var(--text-muted); font-size: 0.85rem;">
+            Sign in to manage complaints routed to your jurisdiction, review SLA escalations, and dispatch resolution remarks.
           </p>
-
-          <div class="quick-accounts-grid" id="quickAccountsList">
-            <!-- Populated dynamically by app.js -->
-            <div style="text-align: center; color: var(--text-muted); padding: 1rem; font-size: 0.8rem;">
-              Loading authority directory...
-            </div>
-          </div>
         </div>
+
+        <div id="loginErrorAlert" style="display: none; background: #fef2f2; border: 1px solid #fecaca; color: #dc2626; padding: 0.75rem 1rem; border-radius: var(--radius-sm); font-size: 0.85rem; margin-bottom: 1.25rem;">
+        </div>
+
+        <form id="authLoginForm">
+          <div class="form-group">
+            <label for="loginUsername">Username or Official Email</label>
+            <input 
+              type="text" 
+              id="loginUsername" 
+              class="form-control" 
+              placeholder="e.g. logi, warden, exam_cell, principal" 
+              required>
+          </div>
+
+          <div class="form-group">
+            <label for="loginPassword">Password</label>
+            <input 
+              type="password" 
+              id="loginPassword" 
+              class="form-control" 
+              placeholder="Enter password" 
+              required>
+          </div>
+
+          <button type="submit" id="loginSubmitBtn" class="btn btn-primary btn-full" style="margin-top: 0.5rem;">
+            Sign In to Authority Dashboard
+          </button>
+        </form>
+
+        <div style="margin-top: 1.5rem; padding-top: 1.25rem; border-top: 1px solid var(--border-color); font-size: 0.8rem; color: var(--text-muted); text-align: center;">
+          Need to file a complaint instead? <a href="index.html" style="color: var(--primary); font-weight: 600; text-decoration: none;">Go to Student Portal</a>
+        </div>
+      </div>
+    </div>
+
+
+    <!-- ======================================================= -->
+    <!-- FIRST-TIME LOGIN PASSWORD CHANGE MODAL (Enforced if must_change_password is true) -->
+    <!-- ======================================================= -->
+    <div id="firstLoginModal" style="display: none; position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(15, 23, 42, 0.8); backdrop-filter: blur(4px); z-index: 9999; align-items: center; justify-content: center; padding: 1rem;">
+      <div style="max-width: 440px; width: 100%; background: var(--bg-card); border: 1px solid var(--border-color); border-radius: var(--radius-lg); padding: 2.25rem; box-shadow: var(--shadow-lg);">
+        <div style="text-align: center; margin-bottom: 1.5rem;">
+          <div style="width: 52px; height: 52px; margin: 0 auto 0.75rem auto; background: #fef3c7; color: #d97706; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 1.5rem;">
+            🔐
+          </div>
+          <h2 style="font-size: 1.3rem; font-weight: 700; color: var(--text-main); margin-bottom: 0.35rem;">First-Time Login Setup</h2>
+          <p style="font-size: 0.85rem; color: var(--text-muted);">
+            For institutional security, please establish your personal password before accessing the authority portal.
+          </p>
+        </div>
+
+        <div id="firstLoginErrorAlert" style="display: none; background: #fef2f2; border: 1px solid #fecaca; color: #dc2626; padding: 0.65rem 0.85rem; border-radius: var(--radius-sm); font-size: 0.825rem; margin-bottom: 1rem;">
+        </div>
+
+        <form id="firstLoginForm">
+          <div class="form-group">
+            <label for="firstLoginNewPass">New Password</label>
+            <input type="password" id="firstLoginNewPass" class="form-control" placeholder="Minimum 4 characters" required minlength="4">
+          </div>
+          <div class="form-group">
+            <label for="firstLoginConfirmPass">Confirm New Password</label>
+            <input type="password" id="firstLoginConfirmPass" class="form-control" placeholder="Re-enter new password" required minlength="4">
+          </div>
+          <button type="submit" id="firstLoginSubmitBtn" class="btn btn-primary btn-full" style="margin-top: 0.5rem;">
+            Save Password & Continue
+          </button>
+        </form>
       </div>
     </div>
 
@@ -122,6 +137,7 @@
           </div>
         </div>
         <div style="display: flex; align-items: center; gap: 0.5rem;">
+          <a id="adminPortalBtn" href="admin.html" class="btn btn-sm btn-outline" style="display: none; color: #2563eb; border-color: #93c5fd; background: #eff6ff; font-weight: 600; text-decoration: none;">⚙️ Admin Console</a>
           <button id="sessionLogoutBtn" class="btn btn-sm btn-outline" style="color: var(--danger); border-color: var(--danger-border);">🚪 Sign Out</button>
         </div>
       </div>

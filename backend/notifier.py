@@ -127,7 +127,8 @@ def _dispatch_smtp(recipient_email: str, subject: str, plain_body: str, html_bod
         part2 = MIMEText(html_body, "html")
         msg.attach(part1)
         msg.attach(part2)
-
+        sent = False
+        e1_err = ""
         # Attempt 1: Port 465 with SSL (direct SMTPS - standard & reliable for cloud hosts like Render)
         try:
             with smtplib.SMTP_SSL(smtp_host, 465, timeout=12) as server:
@@ -136,7 +137,7 @@ def _dispatch_smtp(recipient_email: str, subject: str, plain_body: str, html_bod
             logger.info(f"[SMTP SUCCESS] Real email delivered to {target} via SSL port 465")
             sent = True
         except Exception as e1:
-            e1_err = e1
+            e1_err = str(e1)
             logger.warning(f"[SMTP RETRY] SSL port 465 attempt failed for {target} ({e1}). Attempting port 587 STARTTLS fallback...")
 
         # Attempt 2: Fallback to port 587 with STARTTLS
@@ -150,7 +151,7 @@ def _dispatch_smtp(recipient_email: str, subject: str, plain_body: str, html_bod
                 sent = True
             except Exception as e2:
                 logger.error(f"[SMTP ERROR] Failed to deliver real email to {target}: {e2}")
-                _last_smtp_error = f"Port 465 error: {e1_err} | Port 587 error: {e2}"
+                _last_smtp_error = f"Port 465: {e1_err} | Port 587: {e2}"
 
         if sent:
             success_any = True

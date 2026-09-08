@@ -102,8 +102,43 @@ def get_last_smtp_error() -> str:
     global _last_smtp_error
     return _last_smtp_error
 
+_brevo_credits_cache = {"credits": None, "checked_at": 0}
+
+def get_brevo_credits(api_key: str) -> int:
+    """
+    Checks the remaining email credits for the Brevo account.
+    Returns available credits count (e.g. 300, 0), or -1 if check failed.
+    Cached for 60 seconds to avoid repetitive API queries.
+    """
+    import time
+    now = time.time()
+    if _brevo_credits_cache["credits"] is not None and (now - _brevo_credits_cache["checked_at"]) < 60:
+        return _brevo_credits_cache["credits"]
+    try:
+        resp = httpx.get("https://api.brevo.com/v3/account", headers={"api-key": api_key}, timeout=5.0)
+        if resp.status_code == 200:
+            data = resp.json()
+            plan = data.get("plan", [])
+            if plan and isinstance(plan, list):
+                credits = plan[0].get("credits", 0)
+                _brevo_credits_cache["credits"] = credits
+                _brevo_credits_cache["checked_at"] = now
+                logger.info(f"[BREVO ACCOUNT CHECK] Available credits: {credits}")
+                return credits
+        else:
+            logger.warning(f"[BREVO ACCOUNT CHECK] HTTP {resp.status_code}: {resp.text}")
+    except Exception as e:
+        logger.warning(f"[BREVO ACCOUNT CHECK] Error checking credits: {e}")
+    return -1
+
+
 def _dispatch_smtp(recipient_email: str, subject: str, plain_body: str, html_body: str, also_notify_admin: bool = True) -> bool:
-    """Helper to dispatch real SMTP emails with STARTTLS (port 587) and SSL (port 465) fallback."""
+    """
+    Dispatches outbound email using a resilient cascading fallback chain:
+    1. Brevo REST API (if key present AND account has credits > 0)
+    2. Resend REST API (if key present)
+    3. Direct SMTP (Gmail / Custom Host: Port 465 SSL, then Port 587 STARTTLS)
+    """
     global _last_smtp_error
     _last_smtp_error = ""
 
@@ -115,50 +150,62 @@ def _dispatch_smtp(recipient_email: str, subject: str, plain_body: str, html_bod
 
     resend_api_key = (os.getenv("RESEND_API_KEY") or "").strip()
     brevo_api_key = (os.getenv("BREVO_API_KEY") or "").strip()
+    force_smtp = os.getenv("FORCE_SMTP", "").lower() in ("true", "1", "yes")
 
     # Strictly dispatch to the intended authority recipient
     targets = [recipient_email]
 
-    # PATH A: Brevo HTTPS REST API (Port 443 - sends to ANY recipient without domain verification!)
-    if brevo_api_key:
-        brevo_from_email = (os.getenv("BREVO_SENDER_EMAIL") or os.getenv("SMTP_FROM_EMAIL") or smtp_user or "dlogidth4@gmail.com").strip()
-        brevo_from_name = os.getenv("BREVO_SENDER_NAME", "CampusResolve Alerts")
-        success_any = False
-        brevo_errors = []
-        for target in targets:
-            try:
-                resp = httpx.post(
-                    "https://api.brevo.com/v3/smtp/email",
-                    json={
-                        "sender": {"name": brevo_from_name, "email": brevo_from_email},
-                        "to": [{"email": target}],
-                        "subject": subject,
-                        "htmlContent": html_body,
-                        "textContent": plain_body
-                    },
-                    headers={
-                        "api-key": brevo_api_key,
-                        "Content-Type": "application/json"
-                    },
-                    timeout=15.0
-                )
-                if resp.status_code in (200, 201):
-                    logger.info(f"[BREVO HTTPS SUCCESS] Real email delivered to {target} via Brevo API (port 443)")
-                    success_any = True
-                else:
-                    err_detail = f"Status {resp.status_code}: {resp.text}"
-                    logger.error(f"[BREVO ERROR] Failed to send to {target}: {err_detail}")
-                    brevo_errors.append(f"{target}: {err_detail}")
-            except Exception as ex:
-                logger.error(f"[BREVO ERROR] Failed to send to {target}: {ex}")
-                brevo_errors.append(f"{target}: {ex}")
-        if success_any:
-            return True
-        _last_smtp_error = "Brevo API error: " + " | ".join(brevo_errors)
-        return False
+    # PATH A: Brevo HTTPS REST API (Port 443)
+    if brevo_api_key and not force_smtp:
+        credits = get_brevo_credits(brevo_api_key)
+        if credits == 0:
+            logger.warning(
+                "[BREVO SKIPPED: 0 CREDITS] Brevo free tier limit reached (0 credits). "
+                "Bypassing Brevo to prevent silent drop and cascading directly to Gmail SMTP / alternative transports."
+            )
+            _last_smtp_error = "Brevo account has 0 credits remaining."
+        else:
+            brevo_from_email = (os.getenv("BREVO_SENDER_EMAIL") or os.getenv("SMTP_FROM_EMAIL") or smtp_user or "dlogidth4@gmail.com").strip()
+            brevo_from_name = os.getenv("BREVO_SENDER_NAME", "CampusResolve Alerts")
+            success_any = False
+            brevo_errors = []
+            for target in targets:
+                try:
+                    resp = httpx.post(
+                        "https://api.brevo.com/v3/smtp/email",
+                        json={
+                            "sender": {"name": brevo_from_name, "email": brevo_from_email},
+                            "to": [{"email": target}],
+                            "subject": subject,
+                            "htmlContent": html_body,
+                            "textContent": plain_body
+                        },
+                        headers={
+                            "api-key": brevo_api_key,
+                            "Content-Type": "application/json"
+                        },
+                        timeout=15.0
+                    )
+                    if resp.status_code in (200, 201):
+                        logger.info(f"[BREVO HTTPS SUCCESS] Real email delivered to {target} via Brevo API (port 443)")
+                        success_any = True
+                    else:
+                        err_detail = f"Status {resp.status_code}: {resp.text}"
+                        logger.error(f"[BREVO ERROR] Failed to send to {target}: {err_detail}")
+                        brevo_errors.append(f"{target}: {err_detail}")
+                except Exception as ex:
+                    logger.error(f"[BREVO ERROR] Failed to send to {target}: {ex}")
+                    brevo_errors.append(f"{target}: {ex}")
 
-    # PATH B: Resend HTTPS REST API (Port 443 - 100% permitted on Render & cloud hosts)
-    if resend_api_key:
+            if success_any:
+                _last_smtp_error = ""
+                return True
+            else:
+                logger.warning(f"[BREVO FAILED] Delivery via Brevo failed ({' | '.join(brevo_errors)}). Falling back to direct SMTP...")
+                _last_smtp_error = "Brevo API error: " + " | ".join(brevo_errors)
+
+    # PATH B: Resend HTTPS REST API (Port 443)
+    if resend_api_key and not force_smtp:
         resend_from = (os.getenv("RESEND_FROM") or "CampusResolve <onboarding@resend.dev>").strip()
         success_any = False
         resend_errors = []
@@ -185,23 +232,25 @@ def _dispatch_smtp(recipient_email: str, subject: str, plain_body: str, html_bod
                 else:
                     err_detail = f"Status {resp.status_code}: {resp.text}"
                     if "only send testing emails to your own email address" in resp.text:
-                        err_detail += " -> [ACTION REQUIRED: Resend free testing domain 'onboarding@resend.dev' only allows sending to dlogidth4@gmail.com. Use Brevo API for sending to all authorities.]"
+                        err_detail += " -> [Resend free domain only allows sending to registered email]"
                     logger.error(f"[RESEND ERROR] Failed to send to {target}: {err_detail}")
                     resend_errors.append(f"{target}: {err_detail}")
             except Exception as ex:
                 logger.error(f"[RESEND ERROR] Failed to send to {target}: {ex}")
                 resend_errors.append(f"{target}: {ex}")
-        if success_any:
-            return True
-        _last_smtp_error = "Resend API error: " + " | ".join(resend_errors)
-        return False
 
-    # PATH C: Standard SMTP (port 465 SSL / 587 STARTTLS)
+        if success_any:
+            _last_smtp_error = ""
+            return True
+        else:
+            logger.warning(f"[RESEND FAILED] Delivery via Resend failed ({' | '.join(resend_errors)}). Falling back to direct SMTP...")
+            _last_smtp_error = "Resend API error: " + " | ".join(resend_errors)
+
+    # PATH C: Direct SMTP (Gmail / Custom Host via Port 465 SSL, then Port 587 STARTTLS)
     if not smtp_user or not smtp_pass:
-        _last_smtp_error = "Neither RESEND_API_KEY, BREVO_API_KEY, nor SMTP_USER/SMTP_PASSWORD are configured in environment variables."
-        logger.warning(
-            f"[EMAIL WARNING] Real email to {recipient_email} skipped: {_last_smtp_error}"
-        )
+        msg_err = f"No functional email transport available. ({_last_smtp_error} | SMTP_USER/PASSWORD missing)"
+        _last_smtp_error = msg_err
+        logger.warning(f"[EMAIL WARNING] Real email to {recipient_email} skipped: {msg_err}")
         return False
 
     success_any = False
@@ -210,14 +259,15 @@ def _dispatch_smtp(recipient_email: str, subject: str, plain_body: str, html_bod
         msg["From"] = smtp_from
         msg["To"] = target
         msg["Subject"] = subject
-        
+
         part1 = MIMEText(plain_body, "plain")
         part2 = MIMEText(html_body, "html")
         msg.attach(part1)
         msg.attach(part2)
         sent = False
-        e1_err = ""
-        # Attempt 1: Port 465 with SSL (direct SMTPS - standard & reliable for cloud hosts)
+        smtp_errors = []
+
+        # Try Port 465 SSL first
         try:
             with smtplib.SMTP_SSL(smtp_host, 465, timeout=12) as server:
                 server.login(smtp_user, smtp_pass)
@@ -225,26 +275,27 @@ def _dispatch_smtp(recipient_email: str, subject: str, plain_body: str, html_bod
             logger.info(f"[SMTP SUCCESS] Real email delivered to {target} via SSL port 465")
             sent = True
         except Exception as e1:
-            e1_err = str(e1)
+            smtp_errors.append(f"Port 465 SSL: {e1}")
             logger.warning(f"[SMTP RETRY] SSL port 465 attempt failed for {target} ({e1}). Attempting port 587 STARTTLS fallback...")
 
-        # Attempt 2: Fallback to port 587 with STARTTLS
+        # Fallback to Port 587 STARTTLS
         if not sent:
             try:
                 with smtplib.SMTP(smtp_host, 587, timeout=12) as server:
                     server.starttls()
                     server.login(smtp_user, smtp_pass)
                     server.send_message(msg)
-                logger.info(f"[SMTP SUCCESS] Real email delivered to {target} via port 587")
+                logger.info(f"[SMTP SUCCESS] Real email delivered to {target} via STARTTLS port 587")
                 sent = True
             except Exception as e2:
+                smtp_errors.append(f"Port 587 STARTTLS: {e2}")
                 logger.error(f"[SMTP ERROR] Failed to deliver real email to {target}: {e2}")
-                _last_smtp_error = f"Port 465: {e1_err} | Port 587: {e2}"
-                if "Network is unreachable" in _last_smtp_error:
-                    _last_smtp_error += " | Note: Render Free Tier blocks outbound SMTP (ports 465/587). Add RESEND_API_KEY in Render Environment Variables for HTTPS delivery on port 443, or test locally."
 
         if sent:
             success_any = True
+            _last_smtp_error = ""
+        else:
+            _last_smtp_error = " | ".join(smtp_errors)
 
     return success_any
 

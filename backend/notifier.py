@@ -87,8 +87,17 @@ def get_authority_email(authority_name: str) -> str:
     return f"{authority_name.lower().replace(' ', '.')}@campus.edu"
 
 
+_last_smtp_error = ""
+
+def get_last_smtp_error() -> str:
+    global _last_smtp_error
+    return _last_smtp_error
+
 def _dispatch_smtp(recipient_email: str, subject: str, plain_body: str, html_body: str, also_notify_admin: bool = True) -> bool:
     """Helper to dispatch real SMTP emails with STARTTLS (port 587) and SSL (port 465) fallback."""
+    global _last_smtp_error
+    _last_smtp_error = ""
+
     smtp_host = os.getenv("SMTP_HOST", "smtp.gmail.com")
     smtp_port = int(os.getenv("SMTP_PORT", "587"))
     smtp_user = os.getenv("SMTP_USER") or os.getenv("SMTP_USERNAME")
@@ -96,9 +105,9 @@ def _dispatch_smtp(recipient_email: str, subject: str, plain_body: str, html_bod
     smtp_from = os.getenv("SMTP_FROM_EMAIL") or os.getenv("SMTP_FROM") or smtp_user or "alerts@campusresolve.edu"
 
     if not smtp_user or not smtp_pass:
+        _last_smtp_error = "SMTP_USER or SMTP_PASSWORD is not set in environment variables."
         logger.warning(
-            f"[SMTP WARNING] Real email to {recipient_email} skipped: "
-            f"SMTP_USER or SMTP_PASSWORD is not set in environment variables."
+            f"[SMTP WARNING] Real email to {recipient_email} skipped: {_last_smtp_error}"
         )
         return False
 
@@ -120,6 +129,7 @@ def _dispatch_smtp(recipient_email: str, subject: str, plain_body: str, html_bod
         msg.attach(part2)
 
         sent = False
+        e1_err = None
         # Attempt 1: Configured port (usually 587 with STARTTLS)
         try:
             if smtp_port == 465:
@@ -134,6 +144,7 @@ def _dispatch_smtp(recipient_email: str, subject: str, plain_body: str, html_bod
             logger.info(f"[SMTP SUCCESS] Real email delivered to {target} via port {smtp_port}")
             sent = True
         except Exception as e1:
+            e1_err = e1
             logger.warning(f"[SMTP RETRY] Port {smtp_port} attempt failed for {target} ({e1}). Attempting SSL port 465 fallback...")
 
         # Attempt 2: Fallback to SSL on port 465 (handles networks blocking STARTTLS)
@@ -146,6 +157,7 @@ def _dispatch_smtp(recipient_email: str, subject: str, plain_body: str, html_bod
                 sent = True
             except Exception as e2:
                 logger.error(f"[SMTP ERROR] Failed to deliver real email to {target}: {e2}")
+                _last_smtp_error = f"Port {smtp_port} error: {e1_err} | Port 465 error: {e2}"
 
         if sent:
             success_any = True
@@ -191,11 +203,13 @@ This confirms that your SMTP email engine is fully functional and successfully d
 </html>
 """
     success = _dispatch_smtp(target, subject, plain_body, html_body, also_notify_admin=False)
+    err = get_last_smtp_error()
     return {
         "success": success,
         "recipient": target,
         "timestamp": timestamp_str,
-        "message": f"Test email {'delivered successfully to ' + target if success else 'failed to deliver. Check server logs.'}"
+        "message": f"Test email delivered successfully to {target}" if success else f"Delivery failed: {err}",
+        "error": err if not success else None
     }
 
 

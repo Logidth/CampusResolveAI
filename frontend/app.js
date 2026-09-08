@@ -1,6 +1,11 @@
 // Dynamically detect API and WebSocket endpoints for production, local, and custom deployments
 function getApiBase() {
   if (typeof window !== "undefined" && window.location) {
+    // 0. Config file override (frontend/config.js)
+    if (window.CAMPUSRESOLVE_API_URL && typeof window.CAMPUSRESOLVE_API_URL === "string" && window.CAMPUSRESOLVE_API_URL.trim()) {
+      return window.CAMPUSRESOLVE_API_URL.trim().replace(/\/+$/, "");
+    }
+
     // 1. URL Query Parameter override: ?api=https://my-backend.onrender.com
     try {
       const urlParams = new URLSearchParams(window.location.search);

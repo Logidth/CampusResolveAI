@@ -180,8 +180,16 @@ def root():
 
 @app.get("/health")
 def health_check():
-    """Health check endpoint."""
-    return {"status": "CampusResolve agent running"}
+    """Health check and configuration diagnostics endpoint."""
+    smtp_user = os.getenv("SMTP_USER") or os.getenv("SMTP_USERNAME")
+    smtp_pass = bool(os.getenv("SMTP_PASSWORD"))
+    return {
+        "status": "CampusResolve agent running",
+        "smtp_configured": bool(smtp_user and smtp_pass),
+        "smtp_user": smtp_user if smtp_user else "NOT_SET",
+        "groq_configured": bool(os.getenv("GROQ_API_KEY")),
+        "model": os.getenv("GROQ_MODEL", "openai/gpt-oss-20b")
+    }
 
 
 @app.post("/auth/login", response_model=LoginResponse)

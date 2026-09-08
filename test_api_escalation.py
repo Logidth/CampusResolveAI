@@ -30,7 +30,7 @@ b2_data = res_breach2.json()
 print(f"Breach 2 Result: Escalated to '{b2_data['assigned_authority']}' (Level {b2_data['escalation_level']}), Email: {b2_data['assigned_email']}")
 assert b2_data["assigned_authority"] == "Principal"
 assert b2_data["escalation_level"] == 2
-assert b2_data["assigned_email"] == "717824v27@kce.ac.in"
+assert b2_data["assigned_email"] == "717824v127@kce.ac.in"
 
 # 4. Verify admin escalate check endpoint
 res_admin = client.post("/admin/escalate-check")

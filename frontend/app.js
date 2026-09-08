@@ -310,7 +310,7 @@ if (authLoggedOutView && authLoggedInView) {
     "Dean of Student Affairs": "abijithmohanan2006@gmail.com",
     "Dean of Academics": "717824v101@kce.ac.in",
     "Vice Principal": "logidth78@gmail.com",
-    "Principal": "717824v27@kce.ac.in",
+    "Principal": "717824v127@kce.ac.in",
     "Counseling Cell": "717824v152@kce.ac.in",
     "Admin": "717824v134@kce.ac.in",
     "All": "717824v134@kce.ac.in"
@@ -1115,7 +1115,7 @@ if (adminUsersTableBody) {
         if (tierInput) tierInput.value = "Tier 2 — Executive Oversight";
       } else if (val === "Principal") {
         if (tierInput) tierInput.value = "Tier 3 — Apex Institutional Authority";
-        if (emailInput && !emailInput.value) emailInput.value = "717824v27@kce.ac.in";
+        if (emailInput && !emailInput.value) emailInput.value = "717824v127@kce.ac.in";
       } else if (val === "Counseling Cell") {
         if (tierInput) tierInput.value = "Protected — Student Safety & Wellness";
         if (emailInput && !emailInput.value) emailInput.value = "717824v152@kce.ac.in";

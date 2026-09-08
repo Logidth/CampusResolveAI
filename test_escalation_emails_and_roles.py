@@ -125,7 +125,7 @@ with TestClient(app) as client:
     print(f"   - Emails received by Principal: {len(emails_principal)} (Expected: 1)")
     print(f"      Practical Recipient Email: {emails_principal[0]['recipient_email']}")
     assert len(emails_principal) == 1
-    assert "717824v27@kce.ac.in" in emails_principal[0]["recipient_email"]
+    assert "717824v127@kce.ac.in" in emails_principal[0]["recipient_email"]
 
     # 5. Test Resolution with Remarks & Filtered Role Queues
     print("\n[INFO] [5/5] Testing Resolution with Official Remarks & Queue Filtering:")

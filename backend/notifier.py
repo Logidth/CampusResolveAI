@@ -69,7 +69,7 @@ AUTHORITY_DIRECTORY = {
     },
     "Principal": {
         "name": "Office of the Principal / Director",
-        "email": os.getenv("EMAIL_PRINCIPAL", "717824v27@kce.ac.in"),
+        "email": os.getenv("EMAIL_PRINCIPAL", "717824v127@kce.ac.in"),
         "tier": "Tier 3 — Apex Institutional Authority"
     },
     "Counseling Cell": {

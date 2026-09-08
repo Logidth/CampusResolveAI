@@ -305,28 +305,33 @@ def seed_authority_users(db: Session):
     except Exception:
         db.rollback()
 
-    # 2. Migrate legacy 'admin' to 'logi' with admin@1
+    # 2. Migrate legacy 'admin' to 'logi' if 'logi' does not exist yet
     legacy_admin = db.query(User).filter(User.username == "admin").first()
-    if legacy_admin:
+    logi_exists = db.query(User).filter(User.username == "logi").first()
+    if legacy_admin and not logi_exists:
         legacy_admin.username = "logi"
-        legacy_admin.hashed_password = hash_password("admin@1")
         legacy_admin.full_name = "Logi (Central Institutional Administrator)"
         legacy_admin.role = "Admin"
         legacy_admin.assigned_authority = "All"
         legacy_admin.tier = "Central Administration"
-        legacy_admin.must_change_password = False
+        db.commit()
+    elif legacy_admin and logi_exists:
+        db.delete(legacy_admin)
         db.commit()
 
-    # 3. Migrate legacy 'hod' to 'exam_cell'
+    # 3. Migrate legacy 'hod' to 'exam_cell' if 'exam_cell' does not exist yet
     legacy_hod = db.query(User).filter(User.username == "hod").first()
-    if legacy_hod:
+    exam_cell_exists = db.query(User).filter(User.username == "exam_cell").first()
+    if legacy_hod and not exam_cell_exists:
         legacy_hod.username = "exam_cell"
-        legacy_hod.hashed_password = hash_password("examcell123")
         legacy_hod.full_name = "Controller of Examinations (Exam Cell Admin)"
         legacy_hod.role = "Exam Cell Admin"
         legacy_hod.assigned_authority = "Exam Cell Admin"
         legacy_hod.tier = "Tier 1 — Operational (Marks, Semester & Fees)"
         legacy_hod.email = os.getenv("EMAIL_EXAM_CELL", "717824v101@kce.ac.in")
+        db.commit()
+    elif legacy_hod and exam_cell_exists:
+        db.delete(legacy_hod)
         db.commit()
 
     count_seeded = 0
@@ -348,15 +353,12 @@ def seed_authority_users(db: Session):
             db.add(new_user)
             count_seeded += 1
         else:
-            # Refresh details for default accounts
+            # Refresh metadata only for default accounts - NEVER overwrite existing passwords!
             existing.email = acc["email"]
             existing.full_name = acc["full_name"]
             existing.role = acc["role"]
             existing.assigned_authority = acc["assigned_authority"]
             existing.tier = acc["tier"]
-            # Ensure default credentials match for system accounts
-            if acc["username"] in ("logi", "exam_cell") and not verify_password(acc["password"], existing.hashed_password):
-                existing.hashed_password = hash_password(acc["password"])
             
     db.commit()
     if count_seeded > 0:

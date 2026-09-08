@@ -761,8 +761,9 @@ if (authLoggedOutView && authLoggedInView) {
         if (!res.ok) throw new Error(resData.detail || "Failed to update password.");
 
         alert("✅ Password established successfully! Welcome to your authority dashboard.");
-        user.must_change_password = false;
-        setAuthSession(token || getAuthToken(), user);
+        const updatedUser = resData.user || { ...user, must_change_password: false };
+        updatedUser.must_change_password = false;
+        setAuthSession(token || getAuthToken(), updatedUser);
         modal.style.display = "none";
         window.location.reload();
       } catch (err) {
@@ -1506,7 +1507,7 @@ if (adminUsersTableBody) {
     const sub = document.getElementById("resetModalSubtitle");
     if (sub) sub.innerText = `Setting new temporary credentials for @${username}.`;
     document.getElementById("resetNewPass").value = "";
-    document.getElementById("resetMustChange").checked = true;
+    document.getElementById("resetMustChange").checked = false;
     const modal = document.getElementById("resetPasswordModal");
     if (modal) modal.style.display = "flex";
   };

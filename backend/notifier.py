@@ -111,10 +111,8 @@ def _dispatch_smtp(recipient_email: str, subject: str, plain_body: str, html_bod
     resend_api_key = (os.getenv("RESEND_API_KEY") or "").strip()
     brevo_api_key = (os.getenv("BREVO_API_KEY") or "").strip()
 
-    # Collect recipient list: primary authority plus admin/tester copy if different
+    # Strictly dispatch to the intended authority recipient
     targets = [recipient_email]
-    if also_notify_admin and smtp_user and smtp_user.lower() != recipient_email.lower():
-        targets.append(smtp_user)
 
     # PATH A: Resend HTTPS REST API (Port 443 - 100% permitted on Render & cloud hosts)
     if resend_api_key:
@@ -143,6 +141,8 @@ def _dispatch_smtp(recipient_email: str, subject: str, plain_body: str, html_bod
                     success_any = True
                 else:
                     err_detail = f"Status {resp.status_code}: {resp.text}"
+                    if "only send testing emails to your own email address" in resp.text:
+                        err_detail += " -> [ACTION REQUIRED: Resend free testing domain 'onboarding@resend.dev' only allows sending to dlogidth4@gmail.com. To email other authorities (like @kce.ac.in), add your domain at resend.com/domains or use Brevo API]"
                     logger.error(f"[RESEND ERROR] Failed to send to {target}: {err_detail}")
                     resend_errors.append(f"{target}: {err_detail}")
             except Exception as ex:

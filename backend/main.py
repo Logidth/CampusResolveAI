@@ -11,6 +11,10 @@ from pydantic import BaseModel
 from sqlalchemy import func, text
 from sqlalchemy.orm import Session
 
+from alembic.config import Config
+from alembic import command
+import logging
+
 from backend.database import engine, Base, get_db
 from backend.models import Complaint, ActivityLog, User, StudentConduct
 from backend.agent import classify_complaint, moderate_content, summarize_complaint
@@ -32,6 +36,7 @@ from backend.auth import (
     create_session_token,
     get_current_user,
     require_admin_user,
+    require_principal_user,
     get_optional_user,
     seed_authority_users,
     validate_student_email,
@@ -40,27 +45,27 @@ from backend.auth import (
     ACTIVE_SESSIONS,
 )
 
-# Initialize database tables
-Base.metadata.create_all(bind=engine)
+logger = logging.getLogger("CampusResolve")
 
-def ensure_schema_updates():
-    """Ensure optional columns exist in existing database schemas."""
+def run_migrations():
+    """Run Alembic migrations to ensure database schema is up-to-date."""
     try:
-        with engine.connect() as conn:
-            for sql in [
-                "ALTER TABLE complaints ADD COLUMN photo_url TEXT",
-                "ALTER TABLE complaints ADD COLUMN secondary_category VARCHAR(50)",
-                "ALTER TABLE complaints ADD COLUMN summary TEXT"
-            ]:
-                try:
-                    conn.execute(text(sql))
-                    conn.commit()
-                except Exception:
-                    pass
-    except Exception:
-        pass
+        base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        alembic_ini_path = os.path.join(base_dir, "alembic.ini")
+        if os.path.exists(alembic_ini_path):
+            alembic_cfg = Config(alembic_ini_path)
+            alembic_cfg.set_main_option("script_location", os.path.join(base_dir, "alembic"))
+            command.upgrade(alembic_cfg, "head")
+            logger.info("Alembic database migrations applied successfully to head.")
+        else:
+            logger.warning(f"alembic.ini not found at {alembic_ini_path}, falling back to create_all.")
+            Base.metadata.create_all(bind=engine)
+    except Exception as e:
+        logger.error(f"Error executing Alembic migrations: {e}")
+        Base.metadata.create_all(bind=engine)
 
-ensure_schema_updates()
+# Execute database migrations on startup
+run_migrations()
 
 
 def extract_student_code(email: Optional[str]) -> str:
@@ -84,45 +89,9 @@ def extract_student_code(email: Optional[str]) -> str:
 # FastAPI Lifespan
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # Seed default authority user accounts & auto-migrate columns on boot
+    # Seed default authority user accounts & backfill ticket IDs if missing
     db = next(get_db())
     try:
-        try:
-            db.execute(text("ALTER TABLE complaints ADD COLUMN initial_authority VARCHAR(150)"))
-            db.commit()
-        except Exception:
-            db.rollback()
-
-        try:
-            db.execute(text("ALTER TABLE complaints ADD COLUMN student_email VARCHAR(150)"))
-            db.commit()
-        except Exception:
-            db.rollback()
-
-        try:
-            db.execute(text("ALTER TABLE complaints ADD COLUMN student_name VARCHAR(150)"))
-            db.commit()
-        except Exception:
-            db.rollback()
-
-        try:
-            db.execute(text("ALTER TABLE complaints ADD COLUMN ticket_id VARCHAR(50)"))
-            db.commit()
-        except Exception:
-            db.rollback()
-
-        try:
-            db.execute(text("ALTER TABLE complaints ADD COLUMN secondary_category VARCHAR(50)"))
-            db.commit()
-        except Exception:
-            db.rollback()
-
-        try:
-            db.execute(text("ALTER TABLE complaints ADD COLUMN summary TEXT"))
-            db.commit()
-        except Exception:
-            db.rollback()
-
         try:
             missing_tickets = db.query(Complaint).filter(Complaint.ticket_id.is_(None)).all()
             for comp in missing_tickets:
@@ -137,6 +106,104 @@ async def lifespan(app: FastAPI):
             db.rollback()
 
         seed_authority_users(db)
+
+        # Seed sample complaints if database is empty so analytics dashboard has immediate data
+        if db.query(Complaint).count() == 0:
+            now = datetime.utcnow()
+            samples = [
+                Complaint(
+                    text="Hostel B 3rd floor bathroom water heater not working since 2 days.",
+                    category="hostel",
+                    urgency="high",
+                    status="resolved",
+                    assigned_authority="Warden",
+                    initial_authority="Warden",
+                    ticket_id="v134_t1",
+                    student_email="717824v134@kce.ac.in",
+                    student_name="Logi",
+                    escalation_level=0,
+                    created_at=now - timedelta(hours=36),
+                    resolved_at=now - timedelta(hours=28)
+                ),
+                Complaint(
+                    text="Mess dining hall water cooler dispensing warm murky water.",
+                    category="mess",
+                    urgency="medium",
+                    status="resolved",
+                    assigned_authority="Mess Committee",
+                    initial_authority="Mess Committee",
+                    ticket_id="v101_t2",
+                    student_email="717824v101@kce.ac.in",
+                    student_name="Student",
+                    escalation_level=0,
+                    created_at=now - timedelta(hours=48),
+                    resolved_at=now - timedelta(hours=42)
+                ),
+                Complaint(
+                    text="Street lamp between Library and Mech Block is flickering and dim.",
+                    category="infrastructure",
+                    urgency="low",
+                    status="resolved",
+                    assigned_authority="Estate Office",
+                    initial_authority="Estate Office",
+                    ticket_id="v152_t3",
+                    student_email="717824v152@kce.ac.in",
+                    student_name="Student",
+                    escalation_level=0,
+                    created_at=now - timedelta(hours=24),
+                    resolved_at=now - timedelta(hours=18)
+                ),
+                Complaint(
+                    text="Hostel C room 204 ceiling fan making loud screeching noise.",
+                    category="hostel",
+                    urgency="low",
+                    status="open",
+                    assigned_authority="Warden",
+                    initial_authority="Warden",
+                    ticket_id="v134_t4",
+                    student_email="717824v134@kce.ac.in",
+                    student_name="Logi",
+                    escalation_level=0,
+                    created_at=now - timedelta(hours=12)
+                ),
+                Complaint(
+                    text="Semester 4 marks sheet re-evaluation query pending for over 10 days.",
+                    category="academic",
+                    urgency="urgent",
+                    status="open",
+                    assigned_authority="Dean of Academics",
+                    initial_authority="Exam Cell Admin",
+                    ticket_id="v101_t5",
+                    student_email="717824v101@kce.ac.in",
+                    student_name="Student",
+                    escalation_level=1,
+                    created_at=now - timedelta(hours=72)
+                ),
+                Complaint(
+                    text="Mess breakfast food quality was substandard and undercooked.",
+                    category="mess",
+                    urgency="high",
+                    status="open",
+                    assigned_authority="Principal",
+                    initial_authority="Mess Committee",
+                    ticket_id="v132_t6",
+                    student_email="717824v132@kce.ac.in",
+                    student_name="Student",
+                    escalation_level=2,
+                    created_at=now - timedelta(hours=96)
+                ),
+            ]
+            db.add_all(samples)
+            db.commit()
+
+            log = ActivityLog(
+                complaint_id=samples[5].id,
+                action="DISPUTED_TO_PRINCIPAL",
+                details="Student disputed fake resolution by Mess Committee",
+                timestamp=now - timedelta(hours=30)
+            )
+            db.add(log)
+            db.commit()
     finally:
         db.close()
 
@@ -311,6 +378,22 @@ class DemoAccountItem(BaseModel):
     assigned_authority: Optional[str] = None
     tier: Optional[str] = None
     must_change_password: bool = False
+
+
+class AuthorityAnalyticsItem(BaseModel):
+    authority: str
+    total_raised: int
+    total_resolved: int
+    total_escalated: int
+    total_disputed: int
+    avg_resolution_time_hours: float
+    resolution_rate_percent: float
+
+
+class AuthorityReportResponse(BaseModel):
+    authorities: List[AuthorityAnalyticsItem]
+    departments: Optional[List[AuthorityAnalyticsItem]] = None
+    summary: AuthorityAnalyticsItem
 
 
 # --- Endpoints ---
@@ -532,6 +615,104 @@ def logout(authorization: Optional[str] = Header(None)):
         ACTIVE_SESSIONS.pop(token, None)
         REVOKED_TOKENS.add(token)
     return {"message": "Logged out successfully"}
+
+
+@app.get("/principal/analytics/authority-report", response_model=AuthorityReportResponse)
+def get_principal_authority_report(
+    principal: User = Depends(require_principal_user),
+    db: Session = Depends(get_db)
+):
+    """
+    Principal-only analytics endpoint:
+    Aggregates grievance metrics, resolution velocity, SLA escalations, and student disputes
+    grouped by initial_authority.
+    """
+    complaints = db.query(Complaint).all()
+    
+    # Identify distinct complaints with disputes to principal
+    disputed_log_rows = (
+        db.query(ActivityLog.complaint_id)
+        .filter(ActivityLog.action == "DISPUTED_TO_PRINCIPAL")
+        .distinct()
+        .all()
+    )
+    disputed_complaint_ids = set(r[0] for r in disputed_log_rows)
+
+    # Group complaints by initial_authority (fallback to assigned_authority)
+    grouped: Dict[str, List[Complaint]] = {}
+    for c in complaints:
+        auth_name = c.initial_authority or c.assigned_authority or "Unknown"
+        grouped.setdefault(auth_name, []).append(c)
+
+    authorities_list: List[AuthorityAnalyticsItem] = []
+    
+    overall_raised = 0
+    overall_resolved = 0
+    overall_escalated = 0
+    overall_disputed = 0
+    overall_resolution_durations: List[float] = []
+
+    for auth_name, items in grouped.items():
+        total_raised = len(items)
+        resolved_items = [c for c in items if (c.status or "").strip().lower() == "resolved"]
+        total_resolved = len(resolved_items)
+        total_escalated = sum(1 for c in items if (c.escalation_level or 0) > 0)
+        total_disputed = sum(1 for c in items if c.id in disputed_complaint_ids)
+        
+        # Calculate resolution durations in hours
+        durations = []
+        for c in resolved_items:
+            if c.created_at and c.resolved_at and c.resolved_at >= c.created_at:
+                durations.append((c.resolved_at - c.created_at).total_seconds() / 3600.0)
+            elif c.created_at and c.resolved_at:
+                durations.append(0.0)
+
+        avg_resolution_time_hours = round(sum(durations) / len(durations), 1) if durations else 0.0
+        resolution_rate_percent = round((total_resolved / total_raised) * 100.0, 1) if total_raised > 0 else 0.0
+
+        authorities_list.append(AuthorityAnalyticsItem(
+            authority=auth_name,
+            total_raised=total_raised,
+            total_resolved=total_resolved,
+            total_escalated=total_escalated,
+            total_disputed=total_disputed,
+            avg_resolution_time_hours=avg_resolution_time_hours,
+            resolution_rate_percent=resolution_rate_percent,
+        ))
+
+        overall_raised += total_raised
+        overall_resolved += total_resolved
+        overall_escalated += total_escalated
+        overall_disputed += total_disputed
+        overall_resolution_durations.extend(durations)
+
+    # Sort authorities by total_raised descending
+    authorities_list.sort(key=lambda x: (x.total_raised, x.total_resolved), reverse=True)
+
+    overall_avg_time = (
+        round(sum(overall_resolution_durations) / len(overall_resolution_durations), 1)
+        if overall_resolution_durations else 0.0
+    )
+    overall_rate = (
+        round((overall_resolved / overall_raised) * 100.0, 1)
+        if overall_raised > 0 else 0.0
+    )
+
+    summary_item = AuthorityAnalyticsItem(
+        authority="Overall",
+        total_raised=overall_raised,
+        total_resolved=overall_resolved,
+        total_escalated=overall_escalated,
+        total_disputed=overall_disputed,
+        avg_resolution_time_hours=overall_avg_time,
+        resolution_rate_percent=overall_rate,
+    )
+
+    return AuthorityReportResponse(
+        authorities=authorities_list,
+        departments=authorities_list,
+        summary=summary_item
+    )
 
 
 @app.get("/authorities")

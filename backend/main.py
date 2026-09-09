@@ -4,7 +4,7 @@ import asyncio
 from datetime import datetime, timedelta
 from typing import List, Optional, Dict, Any
 from contextlib import asynccontextmanager
-from fastapi import FastAPI, Depends, HTTPException, Query, WebSocket, WebSocketDisconnect, Header, BackgroundTasks, status
+from fastapi import FastAPI, Depends, HTTPException, Query, WebSocket, WebSocketDisconnect, Header, BackgroundTasks, status, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
@@ -550,7 +550,12 @@ def list_authorities():
 
 
 @app.post("/complaints", response_model=ComplaintOut, status_code=201)
-def create_complaint(payload: ComplaintCreate, background_tasks: BackgroundTasks, db: Session = Depends(get_db)):
+def create_complaint(
+    payload: ComplaintCreate,
+    background_tasks: BackgroundTasks,
+    request: Request = None,
+    db: Session = Depends(get_db)
+):
     """
     Create a new complaint, execute AI classification, route to appropriate authority,
     calculate SLA deadline, enforce harassment safety flags, log activity, and broadcast event.
@@ -562,60 +567,81 @@ def create_complaint(payload: ComplaintCreate, background_tasks: BackgroundTasks
     student_email = payload.student_email.strip().lower() if payload.student_email else None
     student_name = payload.student_name.strip() if payload.student_name else None
 
+    # Fallback: extract student identity from JWT if payload.student_email was not supplied
+    if not student_email and request:
+        auth_hdr = request.headers.get("Authorization")
+        if auth_hdr and auth_hdr.startswith("Bearer "):
+            try:
+                from backend.auth import decode_access_token
+                token_data = decode_access_token(auth_hdr.split(" ", 1)[1].strip())
+                if token_data and token_data.get("sub"):
+                    student_email = token_data.get("sub").strip().lower()
+            except Exception:
+                pass
+
     # 1. Content Moderation & Three-Warning Student Conduct System
     is_flagged, flag_reason = moderate_content(payload.text)
     conduct_warning_msg = None
     conduct_record = None
 
-    if is_flagged and student_email:
-        conduct_record = db.query(StudentConduct).filter(
-            func.lower(StudentConduct.student_email) == student_email
-        ).first()
+    if is_flagged:
+        principal_email = os.getenv("EMAIL_PRINCIPAL", "717824v132@kce.ac.in")
 
-        if not conduct_record:
-            conduct_record = StudentConduct(
-                student_email=student_email,
-                warning_count=0,
-                reported_to_principal=False
-            )
-            db.add(conduct_record)
-            db.flush()
+        if student_email:
+            conduct_record = db.query(StudentConduct).filter(
+                func.lower(StudentConduct.student_email) == student_email
+            ).first()
 
-        conduct_record.warning_count += 1
-        conduct_record.last_warned_at = datetime.utcnow()
+            if not conduct_record:
+                conduct_record = StudentConduct(
+                    student_email=student_email,
+                    warning_count=0,
+                    reported_to_principal=False
+                )
+                db.add(conduct_record)
+                db.flush()
 
-        if conduct_record.warning_count <= 3:
+            conduct_record.warning_count += 1
+            conduct_record.last_warned_at = datetime.utcnow()
+
+            if conduct_record.warning_count <= 3:
+                conduct_warning_msg = (
+                    f"⚠️ Conduct Warning {conduct_record.warning_count}/3: Inappropriate or irrelevant text detected in your complaint ({flag_reason}). "
+                    f"CampusResolve is strictly for genuine college grievances. Having more than 3 warnings will report your student account ({student_email}) directly to the Principal."
+                )
+            else:
+                # Warning count exceeds 3 (4th violation or higher)
+                conduct_warning_msg = (
+                    f"🚨 Formal Conduct Violation #{conduct_record.warning_count}: Inappropriate or irrelevant text detected ({flag_reason}). "
+                    f"Having exceeded the 3-warning limit, your student account ({student_email}) has been formally reported to the Principal ({principal_email}) with your incident history."
+                )
+                conduct_record.reported_to_principal = True
+
+                # Query prior complaints history for Principal dossier
+                prior_complaints = db.query(Complaint).filter(
+                    func.lower(Complaint.student_email) == student_email
+                ).order_by(Complaint.created_at.desc()).limit(10).all()
+
+                flagged_history = [
+                    {"id": c.ticket_id or f"#{c.id}", "text": c.text, "created_at": c.created_at.strftime("%Y-%m-%d %H:%M:%S")}
+                    for c in prior_complaints
+                ]
+                flagged_history.insert(0, {
+                    "id": "Current Submission",
+                    "text": payload.text,
+                    "created_at": datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")
+                })
+
+                background_tasks.add_task(
+                    send_student_conduct_principal_alert,
+                    student_email=student_email,
+                    warning_count=conduct_record.warning_count,
+                    flagged_complaints=flagged_history
+                )
+        else:
             conduct_warning_msg = (
-                f"⚠️ Conduct Warning {conduct_record.warning_count}/3: Inappropriate language detected in your complaint. "
-                "CampusResolve maintains strict behavioral guidelines. Reaching 4 violations will result in automated escalation to the Principal."
-            )
-        elif conduct_record.warning_count >= 4 and not conduct_record.reported_to_principal:
-            conduct_warning_msg = (
-                f"🚨 Formal Conduct Violation #{conduct_record.warning_count}: Multiple submissions containing inappropriate or abusive language detected. "
-                "Having exceeded the 3-warning limit, this dossier has been formally escalated directly to the Office of the Principal."
-            )
-            conduct_record.reported_to_principal = True
-
-            # Query prior complaints history for Principal dossier
-            prior_complaints = db.query(Complaint).filter(
-                func.lower(Complaint.student_email) == student_email
-            ).order_by(Complaint.created_at.desc()).limit(10).all()
-
-            flagged_history = [
-                {"id": c.ticket_id or f"#{c.id}", "text": c.text, "created_at": c.created_at.strftime("%Y-%m-%d %H:%M:%S")}
-                for c in prior_complaints
-            ]
-            flagged_history.insert(0, {
-                "id": "Current Submission",
-                "text": payload.text,
-                "created_at": datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")
-            })
-
-            background_tasks.add_task(
-                send_student_conduct_principal_alert,
-                student_email=student_email,
-                warning_count=conduct_record.warning_count,
-                flagged_complaints=flagged_history
+                f"⚠️ Conduct Warning: Inappropriate or irrelevant text detected ({flag_reason}). "
+                f"CampusResolve is strictly for genuine college grievances. Repeated violations exceeding 3 warnings are reported directly to the Principal ({principal_email})."
             )
 
     # 2. Auto-summarize grievances exceeding 50 words
@@ -699,14 +725,15 @@ def create_complaint(payload: ComplaintCreate, background_tasks: BackgroundTasks
     )
     db.add(activity_entry)
 
-    # If flagged for inappropriate language, record conduct log
+    # If flagged for inappropriate or irrelevant content, record conduct log
     if is_flagged:
         cond_action = "CONDUCT_ESCALATION" if (conduct_record and conduct_record.warning_count >= 4) else "CONDUCT_WARNING"
         strike_num = conduct_record.warning_count if conduct_record else 1
+        strike_desc = f"strike {strike_num}/3" if strike_num <= 3 else f"strike {strike_num} (Exceeded 3 warnings — reported to Principal)"
         db.add(ActivityLog(
             complaint_id=complaint.id,
             action=cond_action,
-            details=f"Inappropriate language detected ({flag_reason}). Student conduct strike {strike_num}/3.",
+            details=f"Inappropriate or irrelevant text detected ({flag_reason}). Student conduct {strike_desc}.",
             timestamp=datetime.utcnow()
         ))
 

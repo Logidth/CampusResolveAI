@@ -1038,7 +1038,7 @@ def send_student_conduct_principal_alert(
     principal_info = AUTHORITY_DIRECTORY.get("Principal", {})
     principal_name = principal_info.get("name", "Office of the Principal / Director")
 
-    subject = f"🚨 [STUDENT CONDUCT ESCALATION] Repeated Inappropriate Language: {student_email} (Violation #{warning_count})"
+    subject = f"🚨 [STUDENT CONDUCT ESCALATION] Inappropriate / Irrelevant Submissions: {student_email} (Violation #{warning_count})"
     timestamp_str = datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S UTC")
 
     # Build history records
@@ -1060,12 +1060,12 @@ def send_student_conduct_principal_alert(
 URGENT: {principal_name}
 Official Student Conduct Violation Dossier — CampusResolve Automated Moderation Engine
 
-Student Account: {student_email}
-Total Inappropriate Language Violations: {warning_count} (Exceeded 3-Warning Limit)
+Student Mail ID: {student_email}
+Total Conduct Violations: {warning_count} (Exceeded 3-Warning Limit)
 Dispatched On: {timestamp_str}
 
-This student has repeatedly submitted grievances containing abusive, profane, or inappropriate language.
-Having received 3 prior warnings, this 4th incident has been escalated directly to the Office of the Principal for administrative review.
+This student has repeatedly submitted grievances containing inappropriate, irrelevant, or abusive content.
+Having exceeded the 3-warning limit ({warning_count} total violations), this dossier has been escalated directly to the Office of the Principal for administrative review and disciplinary inquiry.
 
 ==================================================
 FLAGGED INCIDENT HISTORY
@@ -1098,12 +1098,12 @@ CampusResolve Autonomous Moderation & Institutional Oversight
     </div>
     <div class="content">
       <div class="alert-banner">
-        <strong>Attention Office of the Principal:</strong> Student <strong>{student_email}</strong> has accumulated {warning_count} conduct warnings for inappropriate or abusive language in grievances and is now escalated for executive inquiry.
+        <strong>Attention Office of the Principal:</strong> Student with Mail ID <strong>{student_email}</strong> has accumulated {warning_count} conduct violations for submitting inappropriate or irrelevant content (e.g. social greetings, non-grievance text, or abusive language) and is now escalated for disciplinary inquiry having exceeded the 3-warning limit.
       </div>
 
       <div style="font-size: 14px; margin-bottom: 16px;">
-        <strong>Student Email:</strong> {student_email}<br/>
-        <strong>Violation Count:</strong> <span style="color: #b91c1c; font-weight: 700;">{warning_count}</span><br/>
+        <strong>Student Mail ID:</strong> <span style="font-family: monospace; font-size: 15px; color: #1e293b; font-weight: 700;">{student_email}</span><br/>
+        <strong>Total Violations:</strong> <span style="color: #b91c1c; font-weight: 700;">{warning_count} (Exceeded 3-Warning Limit)</span><br/>
         <strong>Reported On:</strong> {timestamp_str}
       </div>
 

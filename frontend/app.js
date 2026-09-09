@@ -504,6 +504,26 @@ if (complaintForm) {
       document.getElementById("resStatus").innerHTML = getStatusBadge(data.status);
       document.getElementById("resSla").innerText = formatDate(data.sla_deadline);
 
+      // Render Conduct Warning / Escalation Alert if triggered
+      const conductWarningEl = document.getElementById("resConductWarning");
+      if (conductWarningEl) {
+        if (data.conduct_warning) {
+          conductWarningEl.style.display = "block";
+          if (data.conduct_warning.includes("Formal Conduct Violation") || data.conduct_warning.includes("reported to the Principal") || data.conduct_warning.includes("escalated directly to the Office of the Principal")) {
+            conductWarningEl.style.background = "#fef2f2";
+            conductWarningEl.style.border = "1px solid #f87171";
+            conductWarningEl.style.color = "#991b1b";
+          } else {
+            conductWarningEl.style.background = "#fffbeb";
+            conductWarningEl.style.border = "1px solid #fde047";
+            conductWarningEl.style.color = "#854d0e";
+          }
+          conductWarningEl.innerText = data.conduct_warning;
+        } else {
+          conductWarningEl.style.display = "none";
+        }
+      }
+
       // Show confirmation box
       confirmationBox.classList.add("show");
 

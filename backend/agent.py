@@ -397,23 +397,53 @@ PROFANITY_KEYWORDS = [
     "loser", "losers", "dick", "dicks", "crap", "damn"
 ]
 
+IRRELEVANT_PATTERNS = [
+    # Birthday & greetings
+    r"\bhappy\s+birthday\b", r"\bhbd\b", r"\bhappy\s+bday\b",
+    r"\bhappy\s+new\s+year\b", r"\bhappy\s+anniversary\b",
+    r"\bcongratulations\b", r"\bcongrats\b",
+    r"\bhappy\s+diwali\b", r"\bhappy\s+pongal\b", r"\bmerry\s+christmas\b", r"\bhappy\s+holi\b",
+    r"\bgood\s+morning\b", r"\bgood\s+afternoon\b", r"\bgood\s+evening\b", r"\bgood\s+night\b",
+    r"\bhave\s+a\s+(?:great|nice|good)\s+day\b",
+    # Casual conversation & AI assistant queries
+    r"\bhow\s+are\s+you\b", r"\bwhat(?:'s|\s+is)\s+up\b", r"\bwassup\b", r"\bsup\s+bro\b",
+    r"\btell\s+me\s+a\s+joke\b", r"\bsing\s+a\s+song\b", r"\bwho\s+are\s+you\b",
+    r"\bi\s+love\s+you\b", r"\bmarry\s+me\b",
+    # Test & dummy spam
+    r"\btest(?:ing)?\s+(?:123|test|check)\b", r"\bhello\s+world\b",
+    r"\blorem\s+ipsum\b", r"\bbla\s+bla\b", r"\bblah\s+blah\b"
+]
+
 
 def moderate_content(text: str) -> Tuple[bool, str]:
     """
-    Flags abusive, profane, or inappropriate language used BY the student in their complaint text.
-    Distinct from the student reporting harassment/abuse against themselves.
-    Uses fast keyword matching first, with an optional Gemini check for ambiguous aggressive context.
+    Flags abusive, profane, or irrelevant/inappropriate text submitted by the student.
+    Covers:
+    - Profanity, slurs, or vulgar abuse
+    - Irrelevant text like 'happy birthday', social greetings, jokes, pranks, test spam
+    - Irrelevant paragraphs wholly unrelated to university complaints
     Returns: (is_flagged: bool, reason: str)
     """
-    lower_text = text.lower()
+    lower_text = text.lower().strip()
 
-    # 1. Primary Method: Fast keyword-based check
+    # 1. Fast Profanity Check
     for kw in PROFANITY_KEYWORDS:
         pattern = r'\b' + re.escape(kw) + r'\b'
         if re.search(pattern, lower_text):
             return True, f"Inappropriate language detected: '{kw}'"
 
-    # 2. Optional Gemini-based check for ambiguous abusive cases
+    # 2. Fast Irrelevant Greetings / Spam Patterns
+    for pat in IRRELEVANT_PATTERNS:
+        match = re.search(pat, lower_text)
+        if match:
+            return True, f"Irrelevant content: '{match.group(0)}' is not a campus grievance"
+
+    # 3. Very Short Non-Grievance Filler / Greetings
+    words = lower_text.split()
+    if len(words) <= 2 and all(w in ["hi", "hello", "hey", "test", "testing", "ok", "okay", "bye", "cool", "yo", "sup", "thanks"] for w in words):
+        return True, "Irrelevant content: Casual greeting or test text does not state a campus grievance"
+
+    # 4. Gemini AI Compliance & Irrelevant Paragraph Evaluation
     if not MOCK_MODE and GEMINI_API_KEY and GEMINI_API_KEY != "your_gemini_api_key_here":
         try:
             from google import genai
@@ -422,23 +452,42 @@ def moderate_content(text: str) -> Tuple[bool, str]:
             client = genai.Client(api_key=GEMINI_API_KEY)
 
             prompt = (
-                "You are an automated university content moderator. Analyze if the student author of the following "
-                "complaint text is using abusive, profane, vulgar, or threatening language in their submission. "
-                "IMPORTANT: Do NOT flag if they are simply reporting that someone else harassed or mistreated them. "
-                "Only flag if the student's OWN language contains aggressive obscenities, slurs, or vulgar abuse.\n\n"
-                f"Text: \"{text}\"\n\n"
-                "Respond in JSON format with keys: {\"is_inappropriate\": bool, \"reason\": \"short reason or empty string\"}"
+                "You are an automated university institutional compliance officer for CampusResolve, an official college grievance portal. "
+                "Students should ONLY submit legitimate campus grievances regarding: "
+                "campus infrastructure (classrooms, furniture, electrical, labs), hostel facilities (rooms, water, curfew), "
+                "mess dining food quality, academic/examination affairs, or student safety/harassment/ragging.\n\n"
+                "Analyze if the student submission is INAPPROPRIATE or IRRELEVANT:\n"
+                "1. IRRELEVANT: Social greetings (e.g. 'happy birthday', 'good morning'), casual conversation, jokes, pranks, "
+                "gibberish, test text, song lyrics, creative writing, sports commentary, movie discussions, promotional spam, "
+                "or ANY paragraph that is not a genuine grievance related to college operations.\n"
+                "2. INAPPROPRIATE: Abusive, profane, vulgar, derogatory, or threatening language directed by the author.\n\n"
+                "CRITICAL SAFETY NOTE: Do NOT flag legitimate complaints, even if critical of staff or facilities, or reports of harassment/ragging.\n\n"
+                f"Submission: \"{text}\"\n\n"
+                "Respond strictly in JSON format with keys:\n"
+                "{\"is_inappropriate\": bool, \"reason\": \"concise reason explaining why it is inappropriate or irrelevant\"}"
             )
 
             def _call_mod():
-                return client.models.generate_content(
-                    model=GEMINI_MODEL,
-                    contents=prompt,
-                    config=types.GenerateContentConfig(
-                        response_mime_type="application/json",
-                        temperature=0.0
-                    )
-                )
+                models_to_try = [GEMINI_MODEL]
+                for alt in ["gemini-3.6-flash", "gemini-3-flash-preview", "gemini-flash-latest"]:
+                    if alt not in models_to_try:
+                        models_to_try.append(alt)
+
+                last_exc = None
+                for m in models_to_try:
+                    try:
+                        return client.models.generate_content(
+                            model=m,
+                            contents=prompt,
+                            config=types.GenerateContentConfig(
+                                response_mime_type="application/json",
+                                temperature=0.0
+                            )
+                        )
+                    except Exception as err:
+                        last_exc = err
+                        logger.info(f"Gemini moderation model '{m}' failed ({err}), attempting fallback...")
+                raise last_exc
 
             with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
                 future = executor.submit(_call_mod)
@@ -447,7 +496,7 @@ def moderate_content(text: str) -> Tuple[bool, str]:
             if resp.text:
                 data = json.loads(resp.text)
                 if data.get("is_inappropriate") is True:
-                    return True, data.get("reason", "Inappropriate or abusive language detected.")
+                    return True, data.get("reason", "Inappropriate or irrelevant text detected.")
         except Exception as e:
             logger.debug(f"Gemini moderation check skipped or timed out: {e}")
 

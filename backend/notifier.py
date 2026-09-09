@@ -355,7 +355,10 @@ def send_new_complaint_email(
     urgency: str,
     assigned_authority: str,
     sla_deadline: Optional[datetime] = None,
-    photo_url: Optional[str] = None
+    photo_url: Optional[str] = None,
+    secondary_category: Optional[str] = None,
+    summary: Optional[str] = None,
+    is_secondary: bool = False
 ) -> Dict[str, Any]:
     """
     Constructs and dispatches an immediate notification email to the assigned authority upon new complaint creation,
@@ -366,7 +369,10 @@ def send_new_complaint_email(
     recipient_name = recipient_info.get("name", assigned_authority)
     tier_label = recipient_info.get("tier", "Initial Tier (Operational)")
 
-    subject = f"📬 [NEW GRIEVANCE ASSIGNED] Complaint #{complaint_id}: {category.upper()} — Assigned to {assigned_authority}"
+    if is_secondary:
+        subject = f"📬 [CROSS-DEPARTMENT GRIEVANCE] Complaint #{complaint_id}: {category.upper()} (Secondary: {secondary_category.upper() if secondary_category else ''}) — Notification to {assigned_authority}"
+    else:
+        subject = f"📬 [NEW GRIEVANCE ASSIGNED] Complaint #{complaint_id}: {category.upper()} — Assigned to {assigned_authority}"
     
     timestamp_str = datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S UTC")
     sla_str = sla_deadline.strftime("%Y-%m-%d %H:%M:%S UTC") if sla_deadline else "Standard SLA"
@@ -385,23 +391,39 @@ def send_new_complaint_email(
       </div>
     """ if photo_url else ""
 
+    summary_note_plain = f"\nAI Summary: {summary}\n" if summary else ""
+    summary_section_html = f"""
+      <div style="margin: 14px 0; padding: 12px 14px; background: #eff6ff; border-left: 4px solid #3b82f6; border-radius: 4px;">
+        <strong style="color: #1e40af;">🤖 AI Executive Summary:</strong>
+        <div style="font-size: 13px; color: #1e293b; margin-top: 4px; line-height: 1.5;">{summary}</div>
+      </div>
+    """ if summary else ""
+
+    sec_cat_plain = f"\nSecondary Category: {secondary_category.upper()}" if secondary_category else ""
+    sec_cat_html = f"""
+        <tr>
+          <td class="label">Secondary Domain:</td>
+          <td class="val"><span class="badge" style="background:#f1f5f9; color:#475569; border:1px solid #cbd5e1;">{secondary_category.upper()}</span></td>
+        </tr>
+    """ if secondary_category else ""
+
     # Plain Text Email Body
     plain_body = f"""
 ATTENTION: {recipient_name} ({assigned_authority})
 Official Assignment Notice — CampusResolve Automated Triage Engine
 
-A new student grievance has been submitted and AUTONOMOUSLY ROUTED to your office for review and resolution.
+A student grievance has been assigned to your jurisdiction for review and resolution.
 
 ==================================================
 TICKET DETAILS
 ==================================================
 Complaint ID: #{complaint_id}
-Category: {category.upper()}
+Category: {category.upper()}{sec_cat_plain}
 Urgency Level: {urgency.upper()}
 Assigned Authority: {assigned_authority} ({recipient_email})
 Escalation Tier: Level 0 ({tier_label})
 Filed On: {timestamp_str}
-SLA Resolution Target: {sla_str}{photo_note_plain}
+SLA Resolution Target: {sla_str}{photo_note_plain}{summary_note_plain}
 
 Grievance Statement:
 "{complaint_text}"
@@ -465,6 +487,7 @@ CampusResolve Autonomous Grievance Resolution Engine
           <td class="label">Category:</td>
           <td class="val"><span class="badge badge-primary">{category.upper()}</span></td>
         </tr>
+        {sec_cat_html}
         <tr>
           <td class="label">Urgency Priority:</td>
           <td class="val"><strong>{urgency.upper()}</strong></td>
@@ -486,6 +509,8 @@ CampusResolve Autonomous Grievance Resolution Engine
           <td class="val" style="color:#2563eb;"><strong>{sla_str}</strong></td>
         </tr>
       </table>
+
+      {summary_section_html}
 
       <div style="font-weight: 600; font-size: 13px; color: #64748b; text-transform: uppercase;">Grievance Statement:</div>
       <div class="statement-box">
@@ -995,6 +1020,124 @@ CampusResolve Institutional Oversight Engine
     logger.info(
         f"[APPEAL DISPATCH] Sent to Principal <{recipient_email}>: Complaint #{complaint_id} ({ticket_label}) "
         f"dispute on '{reported_authority}' ({dispute_reason})"
+    )
+
+    return _dispatch_smtp(recipient_email, subject, plain_body, html_body)
+
+
+def send_student_conduct_principal_alert(
+    student_email: str,
+    warning_count: int,
+    flagged_complaints: List[Dict[str, Any]]
+) -> bool:
+    """
+    Dispatches an official conduct violation alert to the Principal (717824v132@kce.ac.in).
+    Triggered when a student reaches their 4th submission flagged for abusive/inappropriate language.
+    """
+    recipient_email = os.getenv("EMAIL_PRINCIPAL", "717824v132@kce.ac.in")
+    principal_info = AUTHORITY_DIRECTORY.get("Principal", {})
+    principal_name = principal_info.get("name", "Office of the Principal / Director")
+
+    subject = f"🚨 [STUDENT CONDUCT ESCALATION] Repeated Inappropriate Language: {student_email} (Violation #{warning_count})"
+    timestamp_str = datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S UTC")
+
+    # Build history records
+    history_plain = ""
+    history_html = ""
+    for idx, c in enumerate(flagged_complaints, 1):
+        cid = c.get("id", "N/A")
+        txt = c.get("text", "")
+        dt = c.get("created_at", "N/A")
+        history_plain += f"\n[{idx}] Ticket #{cid} ({dt}):\n\"{txt}\"\n"
+        history_html += f"""
+        <div style="background: #f8fafc; border-left: 4px solid #ef4444; padding: 10px 14px; margin-bottom: 12px; border-radius: 4px;">
+            <div style="font-size: 12px; color: #64748b; font-weight: 600;">Incident #{idx} &middot; Ticket #{cid} ({dt})</div>
+            <div style="font-size: 13px; color: #1e293b; margin-top: 4px;">"{txt}"</div>
+        </div>
+        """
+
+    plain_body = f"""
+URGENT: {principal_name}
+Official Student Conduct Violation Dossier — CampusResolve Automated Moderation Engine
+
+Student Account: {student_email}
+Total Inappropriate Language Violations: {warning_count} (Exceeded 3-Warning Limit)
+Dispatched On: {timestamp_str}
+
+This student has repeatedly submitted grievances containing abusive, profane, or inappropriate language.
+Having received 3 prior warnings, this 4th incident has been escalated directly to the Office of the Principal for administrative review.
+
+==================================================
+FLAGGED INCIDENT HISTORY
+==================================================
+{history_plain}
+
+==================================================
+CampusResolve Autonomous Moderation & Institutional Oversight
+"""
+
+    html_body = f"""
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <style>
+    body {{ font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; background-color: #f8fafc; margin: 0; padding: 20px; color: #0f172a; }}
+    .container {{ max-width: 600px; margin: 0 auto; background: #ffffff; border: 1px solid #e2e8f0; border-radius: 8px; overflow: hidden; box-shadow: 0 4px 6px -1px rgba(0,0,0,0.05); }}
+    .header {{ background: #991b1b; color: #ffffff; padding: 20px 24px; }}
+    .header h1 {{ margin: 0; font-size: 18px; font-weight: 700; }}
+    .content {{ padding: 24px; }}
+    .alert-banner {{ background: #fef2f2; border: 1px solid #fecaca; border-radius: 6px; padding: 12px 16px; margin-bottom: 20px; color: #991b1b; font-size: 14px; font-weight: 500; }}
+    .footer {{ background: #f8fafc; padding: 14px; text-align: center; font-size: 12px; color: #94a3b8; border-top: 1px solid #e2e8f0; }}
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="header">
+      <h1>🚨 Student Conduct Escalation to Principal</h1>
+    </div>
+    <div class="content">
+      <div class="alert-banner">
+        <strong>Attention Office of the Principal:</strong> Student <strong>{student_email}</strong> has accumulated {warning_count} conduct warnings for inappropriate or abusive language in grievances and is now escalated for executive inquiry.
+      </div>
+
+      <div style="font-size: 14px; margin-bottom: 16px;">
+        <strong>Student Email:</strong> {student_email}<br/>
+        <strong>Violation Count:</strong> <span style="color: #b91c1c; font-weight: 700;">{warning_count}</span><br/>
+        <strong>Reported On:</strong> {timestamp_str}
+      </div>
+
+      <div style="font-weight: 700; color: #0f172a; margin: 18px 0 10px 0; font-size: 14px;">
+        📜 Incident History:
+      </div>
+      {history_html}
+    </div>
+    <div class="footer">
+      CampusResolve Autonomous Grievance Engine &middot; Executive Institutional Oversight
+    </div>
+  </div>
+</body>
+</html>
+"""
+
+    _sent_emails.insert(0, {
+        "id": len(_sent_emails) + 1,
+        "complaint_id": 0,
+        "type": "STUDENT_CONDUCT_ESCALATION",
+        "recipient_name": principal_name,
+        "recipient_authority": "Principal",
+        "recipient_email": recipient_email,
+        "subject": subject,
+        "body": plain_body.strip(),
+        "html_body": html_body.strip(),
+        "portal_link": f"{BASE_URL}/app/dashboard.html",
+        "category": "conduct",
+        "timestamp": datetime.utcnow().isoformat()
+    })
+
+    logger.info(
+        f"[CONDUCT ESCALATION] Dispatched to Principal <{recipient_email}>: Student {student_email} "
+        f"violation count {warning_count}"
     )
 
     return _dispatch_smtp(recipient_email, subject, plain_body, html_body)

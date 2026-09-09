@@ -20,12 +20,24 @@ class Complaint(Base):
     escalation_level = Column(Integer, default=0, nullable=False)
     no_auto_escalation = Column(Boolean, default=False, nullable=False)
     photo_url = Column(Text, nullable=True)
+    secondary_category = Column(String(50), nullable=True)
+    summary = Column(Text, nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
     sla_deadline = Column(DateTime, nullable=True)
     resolved_at = Column(DateTime, nullable=True)
 
     # Relationship to ActivityLog
     activity_logs = relationship("ActivityLog", back_populates="complaint", cascade="all, delete-orphan")
+
+
+class StudentConduct(Base):
+    __tablename__ = "student_conduct"
+
+    id = Column(Integer, primary_key=True, index=True, autoincrement=True)
+    student_email = Column(String(150), unique=True, index=True, nullable=False)
+    warning_count = Column(Integer, default=0, nullable=False)
+    last_warned_at = Column(DateTime, nullable=True)
+    reported_to_principal = Column(Boolean, default=False, nullable=False)
 
 
 class ActivityLog(Base):

@@ -1,7 +1,8 @@
 """
 CampusResolve AI Agent Engine
-Autonomous complaint classification with robust error handling, timeout guardrails,
-high-precision domain heuristics, and automated fallback to MOCK_MODE on API failure or rate limit.
+Autonomous complaint classification powered by Google Gemini (gemini-3.8-flash) with structured output,
+Groq secondary fallback, high-precision domain heuristics, multi-category triage,
+content moderation guardrails, and auto-summarization.
 """
 
 import os
@@ -9,7 +10,9 @@ import json
 import re
 import random
 import logging
-from typing import Dict, Any
+import concurrent.futures
+from typing import Dict, Any, Optional, Tuple
+from pydantic import BaseModel
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -20,9 +23,18 @@ VALID_CATEGORIES = ["hostel", "mess", "academic", "infrastructure", "harassment"
 VALID_URGENCIES = ["low", "medium", "high"]
 
 MOCK_MODE = os.getenv("MOCK_MODE", "false").lower() in ["true", "1", "yes"]
+GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
+GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-3.8-flash")
 GROQ_API_KEY = os.getenv("GROQ_API_KEY", "")
 GROQ_MODEL = os.getenv("GROQ_MODEL", "llama-3.3-70b-versatile")
 API_TIMEOUT_SECONDS = float(os.getenv("API_TIMEOUT_SECONDS", "8.0"))
+
+
+class ComplaintClassification(BaseModel):
+    category: str
+    secondary_category: Optional[str] = None
+    urgency: str
+    reasoning: str
 
 
 def _word_match(keywords: list, text: str) -> bool:
@@ -47,6 +59,8 @@ def _count_matches(keywords: list, text: str) -> int:
 def _heuristic_mock_classify(text: str) -> Dict[str, Any]:
     """
     Deterministic & safety-first triage classifier using weighted keyword density matching.
+    Supports multi-category triage (secondary_category set if runner-up score is within 30% of top score).
+    Harassment is always the sole/priority category (never paired with a secondary).
     """
     lower_text = text.lower()
 
@@ -65,6 +79,7 @@ def _heuristic_mock_classify(text: str) -> Dict[str, Any]:
     if _word_match(harassment_kws, lower_text):
         return {
             "category": "harassment",
+            "secondary_category": None,
             "urgency": "high",
             "reasoning": "Identified safety/harassment keywords; flagged for immediate Counseling Cell intervention."
         }
@@ -151,13 +166,22 @@ def _heuristic_mock_classify(text: str) -> Dict[str, Any]:
     if "water" in lower_text and ("hostel" in lower_text or "block" in lower_text or "warden" in lower_text):
         scores["hostel"] += 6
 
-    # Select category with highest score
-    best_category = max(scores, key=scores.get)
-    if scores[best_category] > 0:
-        category = best_category
+    # Sort categories by score descending
+    sorted_scores = sorted(scores.items(), key=lambda x: x[1], reverse=True)
+    top_cat, top_score = sorted_scores[0]
+    runner_up_cat, runner_up_score = sorted_scores[1]
+
+    if top_score > 0:
+        category = top_cat
     else:
         # Default fallback: physical repairs/breakages go to infrastructure
         category = "infrastructure" if ("broken" in lower_text or "damaged" in lower_text or "room" in lower_text or "campus" in lower_text) else "hostel"
+
+    # Multi-category heuristic: runner-up within 30% of top score
+    secondary_category = None
+    if top_score > 0 and runner_up_score > 0 and runner_up_cat != category:
+        if runner_up_score >= (0.70 * top_score):
+            secondary_category = runner_up_cat
 
     # 3. Urgency Evaluation
     high_urgency_kws = ["emergency", "urgent", "danger", "hazard", "threat", "immediate", "severe", "sparking", "fire", "smoke", "contamination", "no water"]
@@ -174,8 +198,12 @@ def _heuristic_mock_classify(text: str) -> Dict[str, Any]:
         urgency = "medium"
 
     reasoning = f"Categorized as {category} with {urgency} priority based on issue description."
+    if secondary_category:
+        reasoning += f" Secondary domain identified: {secondary_category}."
+
     return {
         "category": category,
+        "secondary_category": secondary_category,
         "urgency": urgency,
         "reasoning": reasoning
     }
@@ -183,111 +211,107 @@ def _heuristic_mock_classify(text: str) -> Dict[str, Any]:
 
 def classify_complaint(text: str) -> Dict[str, Any]:
     """
-    Classify a student complaint using LLM function calling / tool use.
-    Wraps API calls in strict timeout and exception handlers to automatically
-    fallback to MOCK_MODE classification without crashing requests.
+    Classify a student complaint using LLM.
+    Priority 1: Google Gemini 3.8 Flash (structured output with response_schema)
+    Priority 2: Groq LLM fallback
+    Priority 3 / Offline: Deterministic keyword heuristics (_heuristic_mock_classify)
+    Enforces strict API timeout to guarantee safe fallback without failing requests.
     """
-    if MOCK_MODE or not GROQ_API_KEY or GROQ_API_KEY == "your_groq_api_key_here":
+    if MOCK_MODE:
         logger.info("Executing complaint classification in MOCK_MODE")
         return _heuristic_mock_classify(text)
 
-    try:
-        from groq import Groq
-        client = Groq(api_key=GROQ_API_KEY, timeout=API_TIMEOUT_SECONDS)
+    system_instruction = (
+        "You are an AI grievance triage officer for a university campus. "
+        "Analyze the user's grievance and categorize it into primary category, optional secondary category, urgency level, and reasoning.\n"
+        "Category Rules:\n"
+        "- 'infrastructure': Classrooms (e.g. C101, C405), benches, desks, chairs, tables, doors, windows, campus lifts, building power, lab equipment, electrical fixtures (assigned to Estate Office).\n"
+        "- 'hostel': Hostel residential blocks (e.g. H-block, hostel room), hostel water supply, warden matters, roommates (assigned to Warden).\n"
+        "- 'mess': Food quality, mess dining, unhygienic meals, catering, canteen (assigned to Mess Committee).\n"
+        "- 'academic': Marks, semester exams, grading errors, exam fees, tuition fees, semester registration, hall tickets, revaluation, syllabus, attendance (assigned to Exam Cell Admin).\n"
+        "- 'harassment': Bullying, ragging, stalking, abuse, safety disclosures (assigned to Counseling Cell, urgency always high).\n"
+        "Multi-Category Rules:\n"
+        "- 'harassment' must ALWAYS be the sole primary category when detected. Never pair harassment with a secondary category or demote it.\n"
+        "- For non-harassment grievances, set 'secondary_category' ONLY if the complaint clearly spans two distinct domains (e.g., hostel room + broken electrical infrastructure, or mess food + hostel dining hall). Otherwise set secondary_category to null.\n"
+        "Allowed categories: 'infrastructure', 'hostel', 'mess', 'academic', 'harassment'.\n"
+        "Allowed urgencies: 'low', 'medium', 'high'."
+    )
 
-        tools = [
-            {
-                "type": "function",
-                "function": {
-                    "name": "classify_campus_complaint",
-                    "description": "Classifies a student complaint into a domain category, urgency level, and one sentence rationale.",
-                    "parameters": {
-                        "type": "object",
-                        "properties": {
-                            "category": {
-                                "type": "string",
-                                "enum": VALID_CATEGORIES,
-                                "description": "The domain of the complaint: 'infrastructure' (classroom benches, desks, doors, campus lifts, electricity, lab fixtures -> Estate Office), 'hostel' (hostel blocks, dorm rooms, hostel water supply -> Warden), 'mess' (food, dining, canteen -> Mess Committee), 'academic' (marks, semester, exam/tuition fees, grades, exams -> Exam Cell Admin), 'harassment' (safety, ragging, counseling -> Counseling Cell)."
-                            },
-                            "urgency": {
-                                "type": "string",
-                                "enum": VALID_URGENCIES,
-                                "description": "Urgency rating (high, medium, low) according to safety, academic impact, or operational disruption."
-                            },
-                            "reasoning": {
-                                "type": "string",
-                                "description": "A concise single-sentence explanation for the classification."
-                            }
-                        },
-                        "required": ["category", "urgency", "reasoning"]
-                    }
-                }
-            }
-        ]
-
-        messages = [
-            {
-                "role": "system",
-                "content": (
-                    "You are an AI grievance triage officer for a university campus. "
-                    "Analyze the user's grievance and call the tool `classify_campus_complaint`. "
-                    "Category Rules:\n"
-                    "- 'infrastructure': Classrooms (e.g. C101, C405), benches, desks, chairs, tables, doors, windows, campus lifts, building power, lab equipment, electrical fixtures (assigned to Estate Office).\n"
-                    "- 'hostel': Hostel residential blocks (e.g. H-block, hostel room), hostel water supply, warden matters, roommates (assigned to Warden).\n"
-                    "- 'mess': Food quality, mess dining, unhygienic meals, catering, canteen (assigned to Mess Committee).\n"
-                    "- 'academic': Marks, semester exams, grading errors, exam fees, tuition fees, semester registration, hall tickets, revaluation, syllabus, attendance (assigned to Exam Cell Admin).\n"
-                    "- 'harassment': Bullying, ragging, stalking, abuse, safety disclosures (assigned to Counseling Cell, urgency always high).\n"
-                    "Allowed urgencies: 'low', 'medium', 'high'."
-                )
-            },
-            {
-                "role": "user",
-                "content": f"Student Complaint: {text}"
-            }
-        ]
-
-        # First attempt: Tool calling
+    # 1. Primary Path: Google Gemini 3.8 Flash with Structured Output
+    if GEMINI_API_KEY and GEMINI_API_KEY != "your_gemini_api_key_here":
         try:
-            response = client.chat.completions.create(
-                model=GROQ_MODEL,
-                messages=messages,
-                tools=tools,
-                tool_choice={"type": "function", "function": {"name": "classify_campus_complaint"}},
-                temperature=0.1
-            )
-            tool_calls = response.choices[0].message.tool_calls
-            if tool_calls:
-                arguments = json.loads(tool_calls[0].function.arguments)
-                cat = arguments.get("category", "").lower()
-                urg = arguments.get("urgency", "").lower()
-                res = arguments.get("reasoning", "")
+            from google import genai
+            from google.genai import types
 
-                if cat not in VALID_CATEGORIES:
-                    cat = "infrastructure"
-                if urg not in VALID_URGENCIES:
-                    urg = "medium"
+            client = genai.Client(api_key=GEMINI_API_KEY)
+
+            def _call_gemini():
+                return client.models.generate_content(
+                    model=GEMINI_MODEL,
+                    contents=f"Student Complaint: {text}",
+                    config=types.GenerateContentConfig(
+                        system_instruction=system_instruction,
+                        response_mime_type="application/json",
+                        response_schema=ComplaintClassification,
+                        temperature=0.1
+                    )
+                )
+
+            with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
+                future = executor.submit(_call_gemini)
+                gemini_resp = future.result(timeout=API_TIMEOUT_SECONDS)
+
+            if gemini_resp.text:
+                parsed = json.loads(gemini_resp.text)
+                cat = str(parsed.get("category", "")).strip().lower()
+                sec_cat = parsed.get("secondary_category")
+                if sec_cat:
+                    sec_cat = str(sec_cat).strip().lower()
+                urg = str(parsed.get("urgency", "")).strip().lower()
+                res = parsed.get("reasoning", "")
+
+                # Harassment Safety Enforcements
+                if cat == "harassment" or sec_cat == "harassment":
+                    cat = "harassment"
+                    sec_cat = None
+                    urg = "high"
+                else:
+                    if cat not in VALID_CATEGORIES:
+                        cat = "infrastructure"
+                    if sec_cat not in VALID_CATEGORIES or sec_cat == cat:
+                        sec_cat = None
+                    if urg not in VALID_URGENCIES:
+                        urg = "medium"
 
                 return {
                     "category": cat,
+                    "secondary_category": sec_cat,
                     "urgency": urg,
                     "reasoning": res or f"Classified under {cat} with {urg} urgency."
                 }
-        except Exception as tool_err:
-            logger.info(f"Tool calling not supported for model {GROQ_MODEL} ({tool_err}), trying JSON format prompt...")
-            # Second attempt: Direct JSON prompt
+
+        except Exception as e:
+            logger.warning(
+                f"Primary Gemini API call failed or timed out ({type(e).__name__}: {e}); "
+                "attempting secondary Groq fallback if configured..."
+            )
+
+    # 2. Secondary Path: Groq LLM Fallback
+    if GROQ_API_KEY and GROQ_API_KEY != "your_groq_api_key_here":
+        try:
+            from groq import Groq
+            groq_client = Groq(api_key=GROQ_API_KEY, timeout=API_TIMEOUT_SECONDS)
+
             json_messages = [
                 {
                     "role": "system",
                     "content": (
                         "You are an AI grievance triage officer for a university campus. "
-                        "Classify the student grievance. Respond ONLY with a valid JSON object in this exact format:\n"
-                        "{\"category\": \"infrastructure\"|\"hostel\"|\"mess\"|\"academic\"|\"harassment\", \"urgency\": \"low\"|\"medium\"|\"high\", \"reasoning\": \"one sentence justification\"}\n\n"
-                        "Rules:\n"
-                        "- 'infrastructure': classrooms, benches, desks, chairs, doors, campus lifts, electricity (Estate Office)\n"
-                        "- 'hostel': residential blocks, hostel water, cleanliness, rooms (Warden)\n"
-                        "- 'mess': food, meals, dining, catering (Mess Committee)\n"
-                        "- 'academic': marks, semester, exam fees, tuition fees, hall ticket, grades, exams (Exam Cell Admin)\n"
-                        "- 'harassment': bullying, ragging, abuse, safety (Counseling Cell, urgency high)"
+                        "Classify the student grievance into JSON format:\n"
+                        "{\"category\": \"infrastructure\"|\"hostel\"|\"mess\"|\"academic\"|\"harassment\", "
+                        "\"secondary_category\": null|\"infrastructure\"|\"hostel\"|\"mess\"|\"academic\", "
+                        "\"urgency\": \"low\"|\"medium\"|\"high\", \"reasoning\": \"one sentence justification\"}\n\n"
+                        "Rule: harassment is always sole category, secondary_category must be null."
                     )
                 },
                 {
@@ -295,33 +319,163 @@ def classify_complaint(text: str) -> Dict[str, Any]:
                     "content": f"Student Complaint: {text}"
                 }
             ]
-            response = client.chat.completions.create(
+            response = groq_client.chat.completions.create(
                 model=GROQ_MODEL,
                 messages=json_messages,
                 temperature=0.1
             )
             raw_content = response.choices[0].message.content or ""
-            # Extract JSON block
             json_match = re.search(r'\{[^{}]*\}', raw_content)
             if json_match:
                 parsed = json.loads(json_match.group(0))
-                cat = parsed.get("category", "").lower()
-                urg = parsed.get("urgency", "").lower()
+                cat = str(parsed.get("category", "")).strip().lower()
+                sec_cat = parsed.get("secondary_category")
+                if sec_cat:
+                    sec_cat = str(sec_cat).strip().lower()
+                urg = str(parsed.get("urgency", "")).strip().lower()
                 res = parsed.get("reasoning", "")
-                if cat in VALID_CATEGORIES and urg in VALID_URGENCIES:
-                    return {
-                        "category": cat,
-                        "urgency": urg,
-                        "reasoning": res or f"Classified under {cat} with {urg} urgency."
-                    }
 
-        logger.warning("No valid response returned by LLM; falling back to heuristic classification.")
-        return _heuristic_mock_classify(text)
+                if cat == "harassment" or sec_cat == "harassment":
+                    cat = "harassment"
+                    sec_cat = None
+                    urg = "high"
+                else:
+                    if cat not in VALID_CATEGORIES:
+                        cat = "infrastructure"
+                    if sec_cat not in VALID_CATEGORIES or sec_cat == cat:
+                        sec_cat = None
+                    if urg not in VALID_URGENCIES:
+                        urg = "medium"
+
+                return {
+                    "category": cat,
+                    "secondary_category": sec_cat,
+                    "urgency": urg,
+                    "reasoning": res or f"Classified under {cat} with {urg} urgency."
+                }
+        except Exception as e:
+            logger.warning(
+                f"Secondary Groq API call failed or timed out ({type(e).__name__}: {e}); "
+                "falling back to heuristic classification."
+            )
+
+    # 3. Tertiary Path: Deterministic Heuristic Classification
+    logger.info("Executing deterministic heuristic classification.")
+    return _heuristic_mock_classify(text)
+
+
+PROFANITY_KEYWORDS = [
+    "fuck", "fucking", "fucked", "fucker", "fuckers",
+    "shit", "shitty", "bullshit", "horseshit",
+    "bitch", "bitches", "asshole", "assholes",
+    "bastard", "bastards", "moron", "morons",
+    "idiot", "idiots", "scumbag", "scumbags",
+    "loser", "losers", "dick", "dicks", "crap", "damn"
+]
+
+
+def moderate_content(text: str) -> Tuple[bool, str]:
+    """
+    Flags abusive, profane, or inappropriate language used BY the student in their complaint text.
+    Distinct from the student reporting harassment/abuse against themselves.
+    Uses fast keyword matching first, with an optional Gemini check for ambiguous aggressive context.
+    Returns: (is_flagged: bool, reason: str)
+    """
+    lower_text = text.lower()
+
+    # 1. Primary Method: Fast keyword-based check
+    for kw in PROFANITY_KEYWORDS:
+        pattern = r'\b' + re.escape(kw) + r'\b'
+        if re.search(pattern, lower_text):
+            return True, f"Inappropriate language detected: '{kw}'"
+
+    # 2. Optional Gemini-based check for ambiguous abusive cases
+    if not MOCK_MODE and GEMINI_API_KEY and GEMINI_API_KEY != "your_gemini_api_key_here":
+        try:
+            from google import genai
+            from google.genai import types
+
+            client = genai.Client(api_key=GEMINI_API_KEY)
+
+            prompt = (
+                "You are an automated university content moderator. Analyze if the student author of the following "
+                "complaint text is using abusive, profane, vulgar, or threatening language in their submission. "
+                "IMPORTANT: Do NOT flag if they are simply reporting that someone else harassed or mistreated them. "
+                "Only flag if the student's OWN language contains aggressive obscenities, slurs, or vulgar abuse.\n\n"
+                f"Text: \"{text}\"\n\n"
+                "Respond in JSON format with keys: {\"is_inappropriate\": bool, \"reason\": \"short reason or empty string\"}"
+            )
+
+            def _call_mod():
+                return client.models.generate_content(
+                    model=GEMINI_MODEL,
+                    contents=prompt,
+                    config=types.GenerateContentConfig(
+                        response_mime_type="application/json",
+                        temperature=0.0
+                    )
+                )
+
+            with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
+                future = executor.submit(_call_mod)
+                resp = future.result(timeout=API_TIMEOUT_SECONDS)
+
+            if resp.text:
+                data = json.loads(resp.text)
+                if data.get("is_inappropriate") is True:
+                    return True, data.get("reason", "Inappropriate or abusive language detected.")
+        except Exception as e:
+            logger.debug(f"Gemini moderation check skipped or timed out: {e}")
+
+    return False, ""
+
+
+def summarize_complaint(text: str) -> Optional[str]:
+    """
+    Summarize student complaints that exceed 50 words into 1-2 concise sentences.
+    If len(text.split()) <= 50, returns None.
+    If Gemini call fails, times out, or MOCK_MODE is on, falls back to first 50 words + '…'.
+    The full original text is always preserved in the database.
+    """
+    words = text.split()
+    if len(words) <= 50:
+        return None
+
+    heuristic_summary = " ".join(words[:50]) + "…"
+
+    if MOCK_MODE or not GEMINI_API_KEY or GEMINI_API_KEY == "your_gemini_api_key_here":
+        return heuristic_summary
+
+    try:
+        from google import genai
+        from google.genai import types
+
+        client = genai.Client(api_key=GEMINI_API_KEY)
+
+        prompt = (
+            "Summarize the following campus grievance in 1 to 2 clear, factual sentences "
+            "highlighting the core problem, location, and urgency:\n\n"
+            f"{text}"
+        )
+
+        def _call_sum():
+            return client.models.generate_content(
+                model=GEMINI_MODEL,
+                contents=prompt,
+                config=types.GenerateContentConfig(temperature=0.1)
+            )
+
+        with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
+            future = executor.submit(_call_sum)
+            resp = future.result(timeout=API_TIMEOUT_SECONDS)
+
+        if resp.text and resp.text.strip():
+            return resp.text.strip()
+        return heuristic_summary
 
     except Exception as e:
         logger.warning(
-            f"LLM API call failed or timed out ({type(e).__name__}: {e}); "
-            "automatically falling back to MOCK_MODE classification without failing request."
+            f"Gemini summarization failed or timed out ({type(e).__name__}: {e}); "
+            "falling back to heuristic summary."
         )
-        return _heuristic_mock_classify(text)
-
+        return heuristic_summary

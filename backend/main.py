@@ -12,8 +12,8 @@ from sqlalchemy import func, text
 from sqlalchemy.orm import Session
 
 from backend.database import engine, Base, get_db
-from backend.models import Complaint, ActivityLog, User
-from backend.agent import classify_complaint
+from backend.models import Complaint, ActivityLog, User, StudentConduct
+from backend.agent import classify_complaint, moderate_content, summarize_complaint
 from backend.scheduler import start_scheduler, stop_scheduler, get_sla_duration, check_and_escalate_grievances
 from backend.websocket_manager import manager, set_main_event_loop, broadcast_activity_sync
 from backend.notifier import (
@@ -21,6 +21,7 @@ from backend.notifier import (
     send_new_complaint_email,
     send_complaint_resolved_email,
     send_authority_dispute_email_to_principal,
+    send_student_conduct_principal_alert,
     send_test_email,
     get_authority_email,
     AUTHORITY_DIRECTORY
@@ -43,13 +44,20 @@ from backend.auth import (
 Base.metadata.create_all(bind=engine)
 
 def ensure_schema_updates():
-    """Ensure optional columns like photo_url exist in existing database schemas."""
+    """Ensure optional columns exist in existing database schemas."""
     try:
         with engine.connect() as conn:
-            conn.execute(text("ALTER TABLE complaints ADD COLUMN photo_url TEXT"))
-            conn.commit()
+            for sql in [
+                "ALTER TABLE complaints ADD COLUMN photo_url TEXT",
+                "ALTER TABLE complaints ADD COLUMN secondary_category VARCHAR(50)",
+                "ALTER TABLE complaints ADD COLUMN summary TEXT"
+            ]:
+                try:
+                    conn.execute(text(sql))
+                    conn.commit()
+                except Exception:
+                    pass
     except Exception:
-        # Column already exists or table freshly created
         pass
 
 ensure_schema_updates()
@@ -99,6 +107,18 @@ async def lifespan(app: FastAPI):
 
         try:
             db.execute(text("ALTER TABLE complaints ADD COLUMN ticket_id VARCHAR(50)"))
+            db.commit()
+        except Exception:
+            db.rollback()
+
+        try:
+            db.execute(text("ALTER TABLE complaints ADD COLUMN secondary_category VARCHAR(50)"))
+            db.commit()
+        except Exception:
+            db.rollback()
+
+        try:
+            db.execute(text("ALTER TABLE complaints ADD COLUMN summary TEXT"))
             db.commit()
         except Exception:
             db.rollback()
@@ -209,6 +229,9 @@ class ComplaintOut(BaseModel):
     escalation_level: int
     no_auto_escalation: bool = False
     photo_url: Optional[str] = None
+    secondary_category: Optional[str] = None
+    summary: Optional[str] = None
+    conduct_warning: Optional[str] = None
     created_at: datetime
     sla_deadline: Optional[datetime] = None
     resolved_at: Optional[datetime] = None
@@ -531,31 +554,96 @@ def create_complaint(payload: ComplaintCreate, background_tasks: BackgroundTasks
     """
     Create a new complaint, execute AI classification, route to appropriate authority,
     calculate SLA deadline, enforce harassment safety flags, log activity, and broadcast event.
+    Enforces student conduct moderation (3 warnings before Principal escalation) and auto-summarization.
     """
     created_at = datetime.utcnow()
 
-    # 1. Call AI Classifier (with timeout + mock fallback protection)
+    # Clean and validate optional student identity
+    student_email = payload.student_email.strip().lower() if payload.student_email else None
+    student_name = payload.student_name.strip() if payload.student_name else None
+
+    # 1. Content Moderation & Three-Warning Student Conduct System
+    is_flagged, flag_reason = moderate_content(payload.text)
+    conduct_warning_msg = None
+    conduct_record = None
+
+    if is_flagged and student_email:
+        conduct_record = db.query(StudentConduct).filter(
+            func.lower(StudentConduct.student_email) == student_email
+        ).first()
+
+        if not conduct_record:
+            conduct_record = StudentConduct(
+                student_email=student_email,
+                warning_count=0,
+                reported_to_principal=False
+            )
+            db.add(conduct_record)
+            db.flush()
+
+        conduct_record.warning_count += 1
+        conduct_record.last_warned_at = datetime.utcnow()
+
+        if conduct_record.warning_count <= 3:
+            conduct_warning_msg = (
+                f"⚠️ Conduct Warning {conduct_record.warning_count}/3: Inappropriate language detected in your complaint. "
+                "CampusResolve maintains strict behavioral guidelines. Reaching 4 violations will result in automated escalation to the Principal."
+            )
+        elif conduct_record.warning_count >= 4 and not conduct_record.reported_to_principal:
+            conduct_warning_msg = (
+                f"🚨 Formal Conduct Violation #{conduct_record.warning_count}: Multiple submissions containing inappropriate or abusive language detected. "
+                "Having exceeded the 3-warning limit, this dossier has been formally escalated directly to the Office of the Principal."
+            )
+            conduct_record.reported_to_principal = True
+
+            # Query prior complaints history for Principal dossier
+            prior_complaints = db.query(Complaint).filter(
+                func.lower(Complaint.student_email) == student_email
+            ).order_by(Complaint.created_at.desc()).limit(10).all()
+
+            flagged_history = [
+                {"id": c.ticket_id or f"#{c.id}", "text": c.text, "created_at": c.created_at.strftime("%Y-%m-%d %H:%M:%S")}
+                for c in prior_complaints
+            ]
+            flagged_history.insert(0, {
+                "id": "Current Submission",
+                "text": payload.text,
+                "created_at": datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")
+            })
+
+            background_tasks.add_task(
+                send_student_conduct_principal_alert,
+                student_email=student_email,
+                warning_count=conduct_record.warning_count,
+                flagged_complaints=flagged_history
+            )
+
+    # 2. Auto-summarize grievances exceeding 50 words
+    summary = summarize_complaint(payload.text)
+
+    # 3. Call AI Classifier (Gemini 3.8 Flash -> Groq -> Heuristic Fallback)
     classification = classify_complaint(payload.text)
     category = classification.get("category", "infrastructure").lower()
+    secondary_category = classification.get("secondary_category")
+    if secondary_category:
+        secondary_category = str(secondary_category).strip().lower()
     urgency = classification.get("urgency", "medium").lower()
     reasoning = classification.get("reasoning", "")
 
-    # 2. Determine Authority & Enforce Harassment Safety Guardrails
+    # 4. Determine Authority & Enforce Harassment Safety Guardrails
     no_auto_escalation = False
-    if category == "harassment":
+    if category == "harassment" or secondary_category == "harassment":
+        category = "harassment"
+        secondary_category = None
         urgency = "high"
         assigned_authority = "Counseling Cell"
         no_auto_escalation = True
     else:
         assigned_authority = AUTHORITY_MAP.get(category, "Estate Office")
 
-    # 3. Calculate SLA Deadline with DEBUG_TIME_SCALE support
+    # 5. Calculate SLA Deadline with DEBUG_TIME_SCALE support
     sla_delta = get_sla_duration(urgency)
     sla_deadline = created_at + sla_delta
-
-    # Clean and validate optional student identity
-    student_email = payload.student_email.strip().lower() if payload.student_email else None
-    student_name = payload.student_name.strip() if payload.student_name else None
 
     # Generate sequential student ticket ID (e.g. v134_t1, v134_t2)
     ticket_id = None
@@ -570,10 +658,12 @@ def create_complaint(payload: ComplaintCreate, background_tasks: BackgroundTasks
     else:
         ticket_id = f"anon_t{datetime.utcnow().strftime('%M%S%f')[:8]}"
 
-    # 4. Create Complaint Record
+    # 6. Create Complaint Record (Original full text always stored)
     complaint = Complaint(
         text=payload.text,
         category=category,
+        secondary_category=secondary_category,
+        summary=summary,
         urgency=urgency,
         status="open",
         assigned_authority=assigned_authority,
@@ -591,9 +681,13 @@ def create_complaint(payload: ComplaintCreate, background_tasks: BackgroundTasks
     db.add(complaint)
     db.flush()
 
-    # 5. Log Activity Entry
+    # 7. Log Activity Entries
     assigned_email = get_authority_email(assigned_authority)
     log_details = f"Classified as {category}/{urgency}, routed to {assigned_authority}. Alert email dispatched to {assigned_email}."
+    if secondary_category:
+        sec_auth = AUTHORITY_MAP.get(secondary_category, "Estate Office")
+        sec_email = get_authority_email(sec_auth)
+        log_details += f" Secondary domain '{secondary_category}' routed to {sec_auth} ({sec_email})."
     if reasoning:
         log_details += f" Reasoning: {reasoning}"
 
@@ -605,26 +699,61 @@ def create_complaint(payload: ComplaintCreate, background_tasks: BackgroundTasks
     )
     db.add(activity_entry)
 
-    # 6. Commit immediately so data is saved without waiting on external networks
+    # If flagged for inappropriate language, record conduct log
+    if is_flagged:
+        cond_action = "CONDUCT_ESCALATION" if (conduct_record and conduct_record.warning_count >= 4) else "CONDUCT_WARNING"
+        strike_num = conduct_record.warning_count if conduct_record else 1
+        db.add(ActivityLog(
+            complaint_id=complaint.id,
+            action=cond_action,
+            details=f"Inappropriate language detected ({flag_reason}). Student conduct strike {strike_num}/3.",
+            timestamp=datetime.utcnow()
+        ))
+
+    # 8. Commit immediately so data is saved without waiting on external networks
     db.commit()
     db.refresh(complaint)
     db.refresh(activity_entry)
 
-    # 7. Asynchronously Dispatch Notification Email via BackgroundTasks
+    # 9. Asynchronously Dispatch Notification Emails
+    # Primary Authority Notification
     background_tasks.add_task(
         send_new_complaint_email,
         complaint_id=complaint.id,
         complaint_text=complaint.text,
         category=complaint.category,
+        secondary_category=complaint.secondary_category,
+        summary=complaint.summary,
         urgency=complaint.urgency,
         assigned_authority=complaint.assigned_authority,
         sla_deadline=complaint.sla_deadline,
-        photo_url=complaint.photo_url
+        photo_url=complaint.photo_url,
+        is_secondary=False
     )
 
-    # 8. Real-Time WebSocket Broadcast
+    # Secondary Authority Notification (if secondary category is distinct from primary)
+    if secondary_category:
+        sec_authority = AUTHORITY_MAP.get(secondary_category)
+        if sec_authority and sec_authority != assigned_authority:
+            background_tasks.add_task(
+                send_new_complaint_email,
+                complaint_id=complaint.id,
+                complaint_text=complaint.text,
+                category=complaint.category,
+                secondary_category=complaint.secondary_category,
+                summary=complaint.summary,
+                urgency=complaint.urgency,
+                assigned_authority=sec_authority,
+                sla_deadline=complaint.sla_deadline,
+                photo_url=complaint.photo_url,
+                is_secondary=True
+            )
+
+    # 10. Real-Time WebSocket Broadcast
     if category == "harassment":
         display_text = "[CONFIDENTIAL - ROUTED TO COUNSELING CELL]"
+    elif summary:
+        display_text = (summary[:60] + "...") if len(summary) > 60 else summary
     else:
         display_text = (complaint.text[:60] + "...") if len(complaint.text) > 60 else complaint.text
 
@@ -639,7 +768,27 @@ def create_complaint(payload: ComplaintCreate, background_tasks: BackgroundTasks
         "assigned_authority": complaint.assigned_authority,
     })
 
-    return complaint
+    return ComplaintOut(
+        id=complaint.id,
+        ticket_id=complaint.ticket_id,
+        text=complaint.text,
+        category=complaint.category,
+        secondary_category=complaint.secondary_category,
+        summary=complaint.summary,
+        urgency=complaint.urgency,
+        status=complaint.status,
+        assigned_authority=complaint.assigned_authority,
+        initial_authority=complaint.initial_authority,
+        student_email=complaint.student_email,
+        student_name=complaint.student_name,
+        escalation_level=complaint.escalation_level,
+        no_auto_escalation=complaint.no_auto_escalation,
+        photo_url=complaint.photo_url,
+        created_at=complaint.created_at,
+        sla_deadline=complaint.sla_deadline,
+        resolved_at=complaint.resolved_at,
+        conduct_warning=conduct_warning_msg
+    )
 
 
 @app.get("/complaints", response_model=List[ComplaintOut])
@@ -679,6 +828,8 @@ def list_complaints(
             ticket_id=f"TICKET-{c.id}",
             text=c.text,
             category=c.category,
+            secondary_category=c.secondary_category,
+            summary=c.summary,
             urgency=c.urgency,
             status=c.status,
             assigned_authority=c.assigned_authority,
@@ -706,6 +857,8 @@ def list_counselor_complaints(db: Session = Depends(get_db)):
             ticket_id=f"TICKET-{c.id}",
             text=c.text,
             category=c.category,
+            secondary_category=c.secondary_category,
+            summary=c.summary,
             urgency=c.urgency,
             status=c.status,
             assigned_authority=c.assigned_authority,
@@ -781,6 +934,8 @@ def get_student_complaints(
             "resolved_at": c.resolved_at.isoformat() if c.resolved_at else None,
             "resolution_remarks": resolution_remarks,
             "photo_url": c.photo_url,
+            "secondary_category": c.secondary_category,
+            "summary": c.summary,
         })
 
     return {
@@ -861,6 +1016,8 @@ def get_complaint(
             ticket_id=f"TICKET-{complaint.id}",
             text=complaint.text,
             category=complaint.category,
+            secondary_category=complaint.secondary_category,
+            summary=complaint.summary,
             urgency=complaint.urgency,
             status=complaint.status,
             assigned_authority=complaint.assigned_authority,
@@ -888,6 +1045,8 @@ def get_complaint(
             ticket_id=complaint.ticket_id or f"t{complaint.id}",
             text=complaint.text,
             category=complaint.category,
+            secondary_category=complaint.secondary_category,
+            summary=complaint.summary,
             urgency=complaint.urgency,
             status=complaint.status,
             assigned_authority=complaint.assigned_authority,
@@ -915,6 +1074,8 @@ def get_complaint(
         ticket_id=complaint.ticket_id or f"TICKET-{complaint.id}",
         text=complaint.text,
         category=complaint.category,
+        secondary_category=complaint.secondary_category,
+        summary=complaint.summary,
         urgency=complaint.urgency,
         status=complaint.status,
         assigned_authority=complaint.assigned_authority,
@@ -1072,6 +1233,9 @@ def resolve_complaint(
         student_name=None,
         escalation_level=complaint.escalation_level,
         no_auto_escalation=complaint.no_auto_escalation,
+        photo_url=complaint.photo_url,
+        secondary_category=complaint.secondary_category,
+        summary=complaint.summary,
         created_at=complaint.created_at,
         sla_deadline=complaint.sla_deadline,
         resolved_at=complaint.resolved_at,

@@ -327,8 +327,14 @@ window.renderStudentHistoryTable = function () {
               </button>
             </div>
           ` : ''}
+        <td>
+          <span style="font-weight: 600;">${(c.category || 'General').toUpperCase()}</span>
+          ${c.secondary_category ? `
+            <div style="margin-top: 3px;">
+              <span style="font-size: 0.72rem; padding: 2px 6px; border-radius: 4px; background: #f1f5f9; color: #475569; border: 1px solid #cbd5e1; font-weight: 600;">+ ${(c.secondary_category).toUpperCase()}</span>
+            </div>
+          ` : ''}
         </td>
-        <td><span style="font-weight: 500;">${(c.category || 'General').toUpperCase()}</span></td>
         <td>${getUrgencyBadge(c.urgency)}</td>
         <td>
           <span style="font-weight: 600; color: var(--text-main);">${c.assigned_authority || 'Pending'}</span>
@@ -488,7 +494,11 @@ if (complaintForm) {
       // Render Confirmation Details
       const displayTicket = data.ticket_id || ('#' + data.id);
       document.getElementById("resId").innerText = displayTicket;
-      document.getElementById("resCategory").innerText = (data.category || "General").toUpperCase();
+      let displayCategory = (data.category || "General").toUpperCase();
+      if (data.secondary_category) {
+        displayCategory += ` + ${data.secondary_category.toUpperCase()} (SECONDARY)`;
+      }
+      document.getElementById("resCategory").innerText = displayCategory;
       document.getElementById("resUrgency").innerHTML = getUrgencyBadge(data.urgency);
       document.getElementById("resAuthority").innerText = data.assigned_authority || "Student Affairs";
       document.getElementById("resStatus").innerHTML = getStatusBadge(data.status);
@@ -574,7 +584,11 @@ async function loadComplaintDetails(id) {
       document.getElementById("trackComplaintHeading").innerText = `Complaint Ticket ${displayHeading}`;
       document.getElementById("trackComplaintText").innerText = `"${data.text}"`;
       document.getElementById("trackStatusBadge").innerHTML = getStatusBadge(data.status);
-      document.getElementById("trackCategory").innerText = (data.category || "General").toUpperCase();
+      let trackCatDisplay = (data.category || "General").toUpperCase();
+      if (data.secondary_category) {
+        trackCatDisplay += ` + ${data.secondary_category.toUpperCase()} (SECONDARY)`;
+      }
+      document.getElementById("trackCategory").innerText = trackCatDisplay;
       document.getElementById("trackUrgency").innerHTML = getUrgencyBadge(data.urgency);
       document.getElementById("trackAuthority").innerText = data.assigned_authority || "Unassigned";
       document.getElementById("trackEscalation").innerText = `Level ${data.escalation_level}`;
@@ -1490,7 +1504,14 @@ if (authLoggedOutView && authLoggedInView) {
               </div>
             ` : ''}
           </td>
-          <td><span style="font-weight: 500;">${c.category || 'General'}</span></td>
+          <td>
+            <span style="font-weight: 600;">${c.category || 'General'}</span>
+            ${c.secondary_category ? `
+              <div style="margin-top: 3px;">
+                <span style="font-size: 0.72rem; padding: 2px 6px; border-radius: 4px; background: #f1f5f9; color: #475569; border: 1px solid #cbd5e1; font-weight: 600;">+ ${c.secondary_category.toUpperCase()} (Secondary)</span>
+              </div>
+            ` : ''}
+          </td>
           <td>${getUrgencyBadge(c.urgency)}</td>
           <td>
             <span style="font-weight: 600; color: var(--text-main);">${c.assigned_authority || 'Unassigned'}</span>

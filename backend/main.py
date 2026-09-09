@@ -804,12 +804,24 @@ def list_complaints(
     Returns complaints currently assigned to this authority OR originating from their department.
     Anonymizes student roll numbers and emails so authorities are not exposed to who submitted the complaint.
     """
+    from fastapi.params import Query as QueryParam
+    if isinstance(status, QueryParam):
+        status = status.default
+    if isinstance(escalated_only, QueryParam):
+        escalated_only = escalated_only.default
+    if isinstance(include_harassment, QueryParam):
+        include_harassment = include_harassment.default
+    if isinstance(assigned_authority, QueryParam):
+        assigned_authority = assigned_authority.default
+
     query = db.query(Complaint)
     
     if assigned_authority and assigned_authority != "All":
+        matched_categories = [cat for cat, auth in AUTHORITY_MAP.items() if auth == assigned_authority]
         query = query.filter(
             (Complaint.assigned_authority == assigned_authority) |
-            (Complaint.initial_authority == assigned_authority)
+            (Complaint.initial_authority == assigned_authority) |
+            (Complaint.secondary_category.in_(matched_categories))
         )
     elif not include_harassment:
         query = query.filter(Complaint.category != "harassment")

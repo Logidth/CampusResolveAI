@@ -27,7 +27,7 @@ GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
 GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-3.8-flash")
 GROQ_API_KEY = os.getenv("GROQ_API_KEY", "")
 GROQ_MODEL = os.getenv("GROQ_MODEL", "llama-3.3-70b-versatile")
-API_TIMEOUT_SECONDS = float(os.getenv("API_TIMEOUT_SECONDS", "8.0"))
+API_TIMEOUT_SECONDS = float(os.getenv("API_TIMEOUT_SECONDS", "12.0"))
 
 
 class ComplaintClassification(BaseModel):
@@ -47,12 +47,17 @@ def _word_match(keywords: list, text: str) -> bool:
 
 
 def _count_matches(keywords: list, text: str) -> int:
-    """Count how many keywords or phrases match in the text."""
+    """Count how many non-overlapping keywords or phrases match in the text."""
+    sorted_kws = sorted(set(keywords), key=lambda x: len(x), reverse=True)
+    matched_spans = []
     count = 0
-    for k in keywords:
+    for k in sorted_kws:
         pattern = r'\b' + re.escape(k) + r'\b'
-        matches = re.findall(pattern, text, re.IGNORECASE)
-        count += len(matches)
+        for match in re.finditer(pattern, text, re.IGNORECASE):
+            start, end = match.span()
+            if not any(max(start, m_start) < min(end, m_end) for m_start, m_end in matched_spans):
+                matched_spans.append((start, end))
+                count += 1
     return count
 
 
@@ -122,7 +127,7 @@ def _heuristic_mock_classify(text: str) -> Dict[str, Any]:
         "hostel room", "roommate", "roommates", "cot", "cots", "mattress", "cupboard", "almirah",
         "curfew", "in-time", "out-time", "night out", "gate pass", "hostel gate", "warden office",
         # Water Supply & Sanitation in Hostels
-        "water supply", "drinking water", "hot water", "cold water", "water shortage",
+        "water", "water issue", "water problem", "water supply", "drinking water", "hot water", "cold water", "water shortage",
         "insufficient water", "no water in hostel", "hostel water", "tap", "taps",
         "washroom", "washrooms", "bathroom", "bathrooms", "toilet", "toilets", "flush",
         "drain", "drainage", "shower", "showers", "geyser", "geysers", "sweeper",
@@ -159,17 +164,18 @@ def _heuristic_mock_classify(text: str) -> Dict[str, Any]:
         "academic": _count_matches(academic_kws, lower_text) * 4
     }
 
-    # Contextual boosts
+    # Store base keyword scores for multi-category runner-up evaluation
+    base_scores = dict(scores)
+
+    # Contextual boosts for primary category tie-breaking
     if "bench" in lower_text or "desk" in lower_text or "chair" in lower_text or "projector" in lower_text or "lift" in lower_text:
         scores["infrastructure"] += 6
 
     if "water" in lower_text and ("hostel" in lower_text or "block" in lower_text or "warden" in lower_text):
         scores["hostel"] += 6
 
-    # Sort categories by score descending
     sorted_scores = sorted(scores.items(), key=lambda x: x[1], reverse=True)
     top_cat, top_score = sorted_scores[0]
-    runner_up_cat, runner_up_score = sorted_scores[1]
 
     if top_score > 0:
         category = top_cat
@@ -177,11 +183,17 @@ def _heuristic_mock_classify(text: str) -> Dict[str, Any]:
         # Default fallback: physical repairs/breakages go to infrastructure
         category = "infrastructure" if ("broken" in lower_text or "damaged" in lower_text or "room" in lower_text or "campus" in lower_text) else "hostel"
 
-    # Multi-category heuristic: runner-up within 30% of top score
+    # Multi-category heuristic: runner-up within 30% of top score based on keyword match density
+    sorted_base = sorted(base_scores.items(), key=lambda x: x[1], reverse=True)
     secondary_category = None
-    if top_score > 0 and runner_up_score > 0 and runner_up_cat != category:
-        if runner_up_score >= (0.70 * top_score):
-            secondary_category = runner_up_cat
+    if len(sorted_base) > 1 and sorted_base[0][1] > 0:
+        candidate_item = next(((cat, sc) for cat, sc in sorted_base if cat != category and sc > 0), None)
+        if candidate_item:
+            cand_name, cand_score = candidate_item
+            top_ref = base_scores.get(category, 0)
+            ref_score = max(top_ref, sorted_base[0][1])
+            if ref_score > 0 and cand_score >= (0.65 * ref_score):
+                secondary_category = cand_name
 
     # 3. Urgency Evaluation
     high_urgency_kws = ["emergency", "urgent", "danger", "hazard", "threat", "immediate", "severe", "sparking", "fire", "smoke", "contamination", "no water"]
@@ -246,16 +258,28 @@ def classify_complaint(text: str) -> Dict[str, Any]:
             client = genai.Client(api_key=GEMINI_API_KEY)
 
             def _call_gemini():
-                return client.models.generate_content(
-                    model=GEMINI_MODEL,
-                    contents=f"Student Complaint: {text}",
-                    config=types.GenerateContentConfig(
-                        system_instruction=system_instruction,
-                        response_mime_type="application/json",
-                        response_schema=ComplaintClassification,
-                        temperature=0.1
-                    )
-                )
+                models_to_try = [GEMINI_MODEL]
+                for alt in ["gemini-3.6-flash", "gemini-3-flash-preview", "gemini-flash-latest"]:
+                    if alt not in models_to_try:
+                        models_to_try.append(alt)
+                
+                last_exc = None
+                for m in models_to_try:
+                    try:
+                        return client.models.generate_content(
+                            model=m,
+                            contents=f"Student Complaint: {text}",
+                            config=types.GenerateContentConfig(
+                                system_instruction=system_instruction,
+                                response_mime_type="application/json",
+                                response_schema=ComplaintClassification,
+                                temperature=0.1
+                            )
+                        )
+                    except Exception as err:
+                        last_exc = err
+                        logger.info(f"Gemini model '{m}' failed ({err}), attempting fallback...")
+                raise last_exc
 
             with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
                 future = executor.submit(_call_gemini)
@@ -459,11 +483,22 @@ def summarize_complaint(text: str) -> Optional[str]:
         )
 
         def _call_sum():
-            return client.models.generate_content(
-                model=GEMINI_MODEL,
-                contents=prompt,
-                config=types.GenerateContentConfig(temperature=0.1)
-            )
+            models_to_try = [GEMINI_MODEL]
+            for alt in ["gemini-3.6-flash", "gemini-3-flash-preview", "gemini-flash-latest"]:
+                if alt not in models_to_try:
+                    models_to_try.append(alt)
+            
+            last_exc = None
+            for m in models_to_try:
+                try:
+                    return client.models.generate_content(
+                        model=m,
+                        contents=prompt,
+                        config=types.GenerateContentConfig(temperature=0.1)
+                    )
+                except Exception as err:
+                    last_exc = err
+            raise last_exc
 
         with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
             future = executor.submit(_call_sum)

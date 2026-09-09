@@ -19,6 +19,7 @@ class Complaint(Base):
     student_name = Column(String(150), nullable=True)
     escalation_level = Column(Integer, default=0, nullable=False)
     no_auto_escalation = Column(Boolean, default=False, nullable=False)
+    photo_url = Column(Text, nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
     sla_deadline = Column(DateTime, nullable=True)
     resolved_at = Column(DateTime, nullable=True)

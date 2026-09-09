@@ -354,11 +354,12 @@ def send_new_complaint_email(
     category: str,
     urgency: str,
     assigned_authority: str,
-    sla_deadline: Optional[datetime] = None
+    sla_deadline: Optional[datetime] = None,
+    photo_url: Optional[str] = None
 ) -> Dict[str, Any]:
     """
     Constructs and dispatches an immediate notification email to the assigned authority upon new complaint creation,
-    including the complete grievance text and direct clickable deep-links to the authority queue.
+    including the complete grievance text, photo evidence link if attached, and direct clickable deep-links.
     """
     recipient_email = get_authority_email(assigned_authority)
     recipient_info = AUTHORITY_DIRECTORY.get(assigned_authority, {})
@@ -373,6 +374,16 @@ def send_new_complaint_email(
     # Direct links to complaint page
     authority_portal_link = f"{BASE_URL}/app/dashboard.html?complaint_id={complaint_id}"
     student_track_link = f"{BASE_URL}/app/index.html?track={complaint_id}"
+
+    photo_note_plain = "\nAttached Photo Evidence: Student uploaded photo proof (inspect in portal)" if photo_url else ""
+    photo_section_html = f"""
+      <div style="margin: 16px 0; padding: 12px 16px; background: #f0fdf4; border: 1px solid #bbf7d0; border-radius: 6px;">
+        <strong style="color: #166534;">📷 Student Attached Photo Evidence:</strong><br/>
+        <div style="margin-top: 8px;">
+          <a href="{authority_portal_link}" target="_blank" style="display: inline-block; background: #16a34a; color: #ffffff !important; padding: 6px 12px; border-radius: 4px; font-size: 13px; font-weight: 600; text-decoration: none;">🔍 View Photo in Authority Portal</a>
+        </div>
+      </div>
+    """ if photo_url else ""
 
     # Plain Text Email Body
     plain_body = f"""
@@ -390,7 +401,7 @@ Urgency Level: {urgency.upper()}
 Assigned Authority: {assigned_authority} ({recipient_email})
 Escalation Tier: Level 0 ({tier_label})
 Filed On: {timestamp_str}
-SLA Resolution Target: {sla_str}
+SLA Resolution Target: {sla_str}{photo_note_plain}
 
 Grievance Statement:
 "{complaint_text}"
@@ -480,7 +491,7 @@ CampusResolve Autonomous Grievance Resolution Engine
       <div class="statement-box">
         "{complaint_text}"
       </div>
-
+{photo_section_html}
       <div class="btn-container">
         <a href="{authority_portal_link}" class="btn">👉 Open Complaint in Authority Portal</a>
       </div>

@@ -162,6 +162,36 @@
                 class="form-control" 
                 placeholder="Describe your grievance clearly. Mention the hostel block, room number, mess dining hall, exam subject, fee reference, or campus facility..." 
                 required></textarea>
+            <div class="form-group" style="margin-top: 1rem; margin-bottom: 1.25rem;">
+              <label style="display: flex; justify-content: space-between; align-items: center; font-size: 0.85rem; font-weight: 600; margin-bottom: 0.4rem;">
+                <span style="display: flex; align-items: center; gap: 0.35rem;">
+                  <span>📷 Attach Photo Evidence</span>
+                  <span style="font-weight: 400; color: var(--text-muted); font-size: 0.78rem;">(Optional)</span>
+                </span>
+                <span style="font-size: 0.75rem; color: var(--text-muted);">JPG, PNG, WebP &middot; Max 5MB</span>
+              </label>
+
+              <div id="photoDropZone" style="border: 2px dashed var(--border-color); border-radius: var(--radius-md); padding: 1.25rem 1rem; text-align: center; cursor: pointer; transition: all 0.2s ease; background: #fafafa;">
+                <input type="file" id="complaintPhotoInput" accept="image/*" style="display: none;">
+                
+                <div id="photoPlaceholder">
+                  <div style="font-size: 1.75rem; margin-bottom: 0.35rem;">📸</div>
+                  <div style="font-size: 0.85rem; font-weight: 600; color: var(--text-main);">Click or drag & drop a photo here</div>
+                  <div style="font-size: 0.75rem; color: var(--text-muted); margin-top: 0.2rem;">Photo proof of broken facility, room repair, dining food quality, etc.</div>
+                </div>
+                
+                <div id="photoPreviewContainer" style="display: none; align-items: center; justify-content: center; flex-direction: column; gap: 0.6rem;">
+                  <div style="position: relative; max-width: 260px; max-height: 180px; border-radius: var(--radius-sm); overflow: hidden; box-shadow: var(--shadow-md); border: 1px solid var(--border-color);">
+                    <img id="photoPreviewImg" src="" alt="Photo Preview" style="width: 100%; max-height: 160px; object-fit: cover; display: block;">
+                  </div>
+                  <div style="display: flex; align-items: center; gap: 0.75rem;">
+                    <span id="photoFileName" style="font-size: 0.78rem; font-weight: 600; color: var(--text-main); font-family: var(--font-mono);"></span>
+                    <button type="button" id="btnRemovePhoto" class="btn btn-sm" style="padding: 0.2rem 0.6rem; font-size: 0.75rem; background: #fee2e2; color: #b91c1c; border: 1px solid #fca5a5; border-radius: var(--radius-sm); cursor: pointer;">
+                      ✕ Remove Photo
+                    </button>
+                  </div>
+                </div>
+              </div>
             </div>
 
             <button type="submit" id="submitBtn" class="btn btn-primary btn-full">
@@ -319,7 +349,20 @@
               <div id="trackStatusBadge"></div>
             </div>
 
-            <p id="trackComplaintText" style="font-style: italic; color: var(--text-main); margin-bottom: 1rem; font-size: 0.95rem; line-height: 1.5;"></p>
+            <p id="trackComplaintText" style="font-style: italic; color: var(--text-main); margin-bottom: 0.75rem; font-size: 0.95rem; line-height: 1.5;"></p>
+
+            <!-- Attached Photo Evidence View -->
+            <div id="trackPhotoContainer" style="display: none; margin-bottom: 1.25rem; padding: 0.85rem; background: #f8fafc; border: 1px solid var(--border-color); border-radius: var(--radius-sm);">
+              <div style="font-size: 0.8rem; font-weight: 700; color: var(--text-muted); margin-bottom: 0.5rem; text-transform: uppercase; letter-spacing: 0.05em; display: flex; align-items: center; gap: 0.4rem;">
+                <span>📷 Attached Photo Evidence</span>
+              </div>
+              <div style="display: inline-block; cursor: pointer; border-radius: var(--radius-sm); overflow: hidden; border: 1px solid var(--border-color); box-shadow: var(--shadow-sm);" onclick="openPhotoModal(document.getElementById('trackPhotoImg').src)">
+                <img id="trackPhotoImg" src="" alt="Evidence Photo" style="max-width: 280px; max-height: 190px; display: block; object-fit: cover;">
+              </div>
+              <div style="font-size: 0.72rem; color: var(--primary); margin-top: 0.35rem; font-weight: 500; cursor: pointer;" onclick="openPhotoModal(document.getElementById('trackPhotoImg').src)">
+                🔍 Click photo to view full resolution
+              </div>
+            </div>
 
             <div class="confirmation-grid">
               <div class="meta-item">
@@ -521,6 +564,21 @@
           </button>
         </div>
       </form>
+    </div>
+  </div>
+
+  <!-- Photo Lightbox Inspection Modal -->
+  <div id="photoLightboxModal" style="display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(15, 23, 42, 0.85); backdrop-filter: blur(4px); z-index: 100000; align-items: center; justify-content: center; padding: 1.5rem;" onclick="closePhotoModal()">
+    <div style="position: relative; max-width: 90vw; max-height: 90vh; background: #ffffff; border-radius: var(--radius-md); overflow: hidden; box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.5);" onclick="event.stopPropagation()">
+      <div style="display: flex; justify-content: space-between; align-items: center; padding: 0.75rem 1.25rem; background: #0f172a; color: #ffffff;">
+        <span style="font-weight: 600; font-size: 0.9rem; display: flex; align-items: center; gap: 0.5rem;">
+          <span>📷</span> <span>Grievance Photo Evidence</span>
+        </span>
+        <button type="button" onclick="closePhotoModal()" style="background: transparent; border: none; color: #ffffff; font-size: 1.3rem; cursor: pointer; line-height: 1; padding: 0.2rem 0.5rem;">&times;</button>
+      </div>
+      <div style="padding: 1rem; text-align: center; max-height: calc(90vh - 60px); overflow: auto;">
+        <img id="photoLightboxImg" src="" alt="Enlarged Evidence" style="max-width: 100%; max-height: 75vh; object-fit: contain; border-radius: 4px;">
+      </div>
     </div>
   </div>
 

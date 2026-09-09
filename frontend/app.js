@@ -320,6 +320,13 @@ window.renderStudentHistoryTable = function () {
               ${c.resolution_remarks}
             </div>
           ` : ''}
+          ${c.photo_url ? `
+            <div style="margin-top: 0.35rem;">
+              <button type="button" onclick="openPhotoModal('${c.photo_url}')" class="btn btn-sm" style="padding: 2px 7px; font-size: 0.72rem; background: #eff6ff; color: #1d4ed8; border: 1px solid #bfdbfe; border-radius: 4px; display: inline-flex; align-items: center; gap: 4px; cursor: pointer;">
+                📷 View Attached Photo
+              </button>
+            </div>
+          ` : ''}
         </td>
         <td><span style="font-weight: 500;">${(c.category || 'General').toUpperCase()}</span></td>
         <td>${getUrgencyBadge(c.urgency)}</td>
@@ -463,6 +470,7 @@ if (complaintForm) {
         text: complaintText,
         student_email: studentUser ? studentUser.email : null,
         student_name: studentUser ? studentUser.full_name : null,
+        photo_url: selectedComplaintPhotoBase64 || null,
       };
 
       const res = await fetch(`${API_BASE}/complaints`, {
@@ -503,6 +511,7 @@ if (complaintForm) {
       }
 
       complaintForm.reset();
+      if (window.clearComplaintPhoto) window.clearComplaintPhoto();
       // Auto-refresh history so it appears immediately in history tab
       loadStudentHistory();
     } catch (err) {
@@ -571,6 +580,19 @@ async function loadComplaintDetails(id) {
       document.getElementById("trackEscalation").innerText = `Level ${data.escalation_level}`;
       document.getElementById("trackSla").innerText = formatDate(data.sla_deadline);
       document.getElementById("trackResolvedAt").innerText = data.resolved_at ? formatDate(data.resolved_at) : "Open / In Progress";
+
+      // Display attached photo if present
+      const trackPhotoContainer = document.getElementById("trackPhotoContainer");
+      const trackPhotoImg = document.getElementById("trackPhotoImg");
+      if (trackPhotoContainer && trackPhotoImg) {
+        if (data.photo_url) {
+          trackPhotoImg.src = data.photo_url;
+          trackPhotoContainer.style.display = "block";
+        } else {
+          trackPhotoContainer.style.display = "none";
+          trackPhotoImg.src = "";
+        }
+      }
 
       const timelineEl = document.getElementById("trackTimeline");
       timelineEl.innerHTML = "";
@@ -876,6 +898,135 @@ window.submitDisputeAuthority = async function(e) {
 // Automatically boot student portal states if on index.html
 if (document.getElementById("studentAuthCard") || document.getElementById("studentAppSection")) {
   initStudentPortal();
+  initComplaintPhotoUpload();
+}
+
+// Global Photo Lightbox Modal
+window.openPhotoModal = function (url) {
+  if (!url) return;
+  const modal = document.getElementById("photoLightboxModal");
+  const img = document.getElementById("photoLightboxImg");
+  if (modal && img) {
+    img.src = url;
+    modal.style.display = "flex";
+  }
+};
+
+window.closePhotoModal = function () {
+  const modal = document.getElementById("photoLightboxModal");
+  const img = document.getElementById("photoLightboxImg");
+  if (modal) modal.style.display = "none";
+  if (img) img.src = "";
+};
+
+// Client-side photo attachment and compression handler
+let selectedComplaintPhotoBase64 = null;
+
+function initComplaintPhotoUpload() {
+  const dropZone = document.getElementById("photoDropZone");
+  const fileInput = document.getElementById("complaintPhotoInput");
+  const placeholder = document.getElementById("photoPlaceholder");
+  const previewContainer = document.getElementById("photoPreviewContainer");
+  const previewImg = document.getElementById("photoPreviewImg");
+  const fileNameEl = document.getElementById("photoFileName");
+  const removeBtn = document.getElementById("btnRemovePhoto");
+
+  if (!dropZone || !fileInput) return;
+
+  dropZone.addEventListener("click", (e) => {
+    if (e.target.id === "btnRemovePhoto" || e.target.closest("#btnRemovePhoto")) return;
+    fileInput.click();
+  });
+
+  dropZone.addEventListener("dragover", (e) => {
+    e.preventDefault();
+    dropZone.style.borderColor = "var(--primary)";
+    dropZone.style.background = "#eff6ff";
+  });
+
+  dropZone.addEventListener("dragleave", (e) => {
+    e.preventDefault();
+    dropZone.style.borderColor = "var(--border-color)";
+    dropZone.style.background = "#fafafa";
+  });
+
+  dropZone.addEventListener("drop", (e) => {
+    e.preventDefault();
+    dropZone.style.borderColor = "var(--border-color)";
+    dropZone.style.background = "#fafafa";
+    if (e.dataTransfer.files && e.dataTransfer.files[0]) {
+      handlePhotoFile(e.dataTransfer.files[0]);
+    }
+  });
+
+  fileInput.addEventListener("change", (e) => {
+    if (e.target.files && e.target.files[0]) {
+      handlePhotoFile(e.target.files[0]);
+    }
+  });
+
+  if (removeBtn) {
+    removeBtn.addEventListener("click", (e) => {
+      e.stopPropagation();
+      window.clearComplaintPhoto();
+    });
+  }
+
+  function handlePhotoFile(file) {
+    if (!file.type.startsWith("image/")) {
+      alert("Please upload an image file (PNG, JPG, or WebP).");
+      return;
+    }
+    if (file.size > 5 * 1024 * 1024) {
+      alert("Selected photo is larger than 5MB. Please choose a smaller image.");
+      return;
+    }
+
+    const reader = new FileReader();
+    reader.onload = function (evt) {
+      const rawDataUrl = evt.target.result;
+      compressImage(rawDataUrl, 1280, 0.85, (compressed) => {
+        selectedComplaintPhotoBase64 = compressed;
+        if (previewImg) previewImg.src = compressed;
+        if (fileNameEl) fileNameEl.innerText = file.name;
+        if (placeholder) placeholder.style.display = "none";
+        if (previewContainer) previewContainer.style.display = "flex";
+      });
+    };
+    reader.readAsDataURL(file);
+  }
+
+  window.clearComplaintPhoto = function () {
+    selectedComplaintPhotoBase64 = null;
+    if (fileInput) fileInput.value = "";
+    if (previewImg) previewImg.src = "";
+    if (placeholder) placeholder.style.display = "block";
+    if (previewContainer) previewContainer.style.display = "none";
+  };
+}
+
+function compressImage(src, maxDim, quality, callback) {
+  const img = new Image();
+  img.onload = function () {
+    let width = img.width;
+    let height = img.height;
+    if (width > maxDim || height > maxDim) {
+      if (width > height) {
+        height = Math.round((height * maxDim) / width);
+        width = maxDim;
+      } else {
+        width = Math.round((width * maxDim) / height);
+        height = maxDim;
+      }
+    }
+    const canvas = document.createElement("canvas");
+    canvas.width = width;
+    canvas.height = height;
+    const ctx = canvas.getContext("2d");
+    ctx.drawImage(img, 0, 0, width, height);
+    callback(canvas.toDataURL("image/jpeg", quality));
+  };
+  img.src = src;
 }
 
 
@@ -1331,6 +1482,13 @@ if (authLoggedOutView && authLoggedInView) {
           <td><strong style="color: var(--primary);">#${c.id}</strong></td>
           <td style="max-width: 240px; word-break: break-word; font-size: 0.85rem;" title="${c.text}">
             ${c.text.length > 70 ? c.text.substring(0, 70) + '...' : c.text}
+            ${c.photo_url ? `
+              <div style="margin-top: 4px;">
+                <button type="button" onclick="openPhotoModal('${c.photo_url}')" class="btn btn-sm" style="padding: 2px 7px; font-size: 0.72rem; background: #eff6ff; color: #1d4ed8; border: 1px solid #bfdbfe; border-radius: 4px; display: inline-flex; align-items: center; gap: 4px; cursor: pointer;">
+                  📷 Photo Evidence
+                </button>
+              </div>
+            ` : ''}
           </td>
           <td><span style="font-weight: 500;">${c.category || 'General'}</span></td>
           <td>${getUrgencyBadge(c.urgency)}</td>

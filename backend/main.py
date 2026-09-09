@@ -39,8 +39,20 @@ from backend.auth import (
     ACTIVE_SESSIONS,
 )
 
-# Initialize SQLite database tables
+# Initialize database tables
 Base.metadata.create_all(bind=engine)
+
+def ensure_schema_updates():
+    """Ensure optional columns like photo_url exist in existing database schemas."""
+    try:
+        with engine.connect() as conn:
+            conn.execute(text("ALTER TABLE complaints ADD COLUMN photo_url TEXT"))
+            conn.commit()
+    except Exception:
+        # Column already exists or table freshly created
+        pass
+
+ensure_schema_updates()
 
 
 def extract_student_code(email: Optional[str]) -> str:
@@ -163,6 +175,7 @@ class ComplaintCreate(BaseModel):
     text: str
     student_email: Optional[str] = None
     student_name: Optional[str] = None
+    photo_url: Optional[str] = None
 
 
 class StudentLoginRequest(BaseModel):
@@ -195,6 +208,7 @@ class ComplaintOut(BaseModel):
     student_name: Optional[str] = None
     escalation_level: int
     no_auto_escalation: bool = False
+    photo_url: Optional[str] = None
     created_at: datetime
     sla_deadline: Optional[datetime] = None
     resolved_at: Optional[datetime] = None
@@ -569,6 +583,7 @@ def create_complaint(payload: ComplaintCreate, background_tasks: BackgroundTasks
         student_name=student_name,
         escalation_level=0,
         no_auto_escalation=no_auto_escalation,
+        photo_url=payload.photo_url,
         created_at=created_at,
         sla_deadline=sla_deadline,
         resolved_at=None,
@@ -603,7 +618,8 @@ def create_complaint(payload: ComplaintCreate, background_tasks: BackgroundTasks
         category=complaint.category,
         urgency=complaint.urgency,
         assigned_authority=complaint.assigned_authority,
-        sla_deadline=complaint.sla_deadline
+        sla_deadline=complaint.sla_deadline,
+        photo_url=complaint.photo_url
     )
 
     # 8. Real-Time WebSocket Broadcast
@@ -674,6 +690,7 @@ def list_complaints(
             created_at=c.created_at,
             sla_deadline=c.sla_deadline,
             resolved_at=c.resolved_at,
+            photo_url=c.photo_url,
         )
         for c in complaints
     ]
@@ -700,6 +717,7 @@ def list_counselor_complaints(db: Session = Depends(get_db)):
             created_at=c.created_at,
             sla_deadline=c.sla_deadline,
             resolved_at=c.resolved_at,
+            photo_url=c.photo_url,
         )
         for c in complaints
     ]
@@ -762,6 +780,7 @@ def get_student_complaints(
             "sla_deadline": c.sla_deadline.isoformat() if c.sla_deadline else None,
             "resolved_at": c.resolved_at.isoformat() if c.resolved_at else None,
             "resolution_remarks": resolution_remarks,
+            "photo_url": c.photo_url,
         })
 
     return {
@@ -853,6 +872,7 @@ def get_complaint(
             created_at=complaint.created_at,
             sla_deadline=complaint.sla_deadline,
             resolved_at=complaint.resolved_at,
+            photo_url=complaint.photo_url,
             activity_logs=complaint.activity_logs
         )
 
@@ -879,6 +899,7 @@ def get_complaint(
             created_at=complaint.created_at,
             sla_deadline=complaint.sla_deadline,
             resolved_at=complaint.resolved_at,
+            photo_url=complaint.photo_url,
             activity_logs=complaint.activity_logs
         )
 
@@ -905,6 +926,7 @@ def get_complaint(
         created_at=complaint.created_at,
         sla_deadline=complaint.sla_deadline,
         resolved_at=complaint.resolved_at,
+        photo_url=complaint.photo_url,
         activity_logs=complaint.activity_logs
     )
 

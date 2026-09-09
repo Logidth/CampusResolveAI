@@ -430,6 +430,7 @@ textarea.form-control {
 
 .badge-open { background: #eff6ff; color: #1d4ed8; border: 1px solid #bfdbfe; }
 .badge-resolved { background: #ecfdf5; color: #047857; border: 1px solid #a7f3d0; }
+.badge-flagged { background: #fef2f2; color: #991b1b; border: 1px solid #fecaca; }
 .badge-high { background: #fef2f2; color: #b91c1c; border: 1px solid #fecaca; }
 .badge-medium { background: #fffbeb; color: #b45309; border: 1px solid #fde68a; }
 .badge-low { background: #f8fafc; color: #475569; border: 1px solid #cbd5e1; }

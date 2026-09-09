@@ -644,32 +644,47 @@ def create_complaint(
                 f"CampusResolve is strictly for genuine college grievances. Repeated violations exceeding 3 warnings are reported directly to the Principal ({principal_email})."
             )
 
-    # 2. Auto-summarize grievances exceeding 50 words
-    summary = summarize_complaint(payload.text)
-
-    # 3. Call AI Classifier (Gemini 3.8 Flash -> Groq -> Heuristic Fallback)
-    classification = classify_complaint(payload.text)
-    category = classification.get("category", "infrastructure").lower()
-    secondary_category = classification.get("secondary_category")
-    if secondary_category:
-        secondary_category = str(secondary_category).strip().lower()
-    urgency = classification.get("urgency", "medium").lower()
-    reasoning = classification.get("reasoning", "")
-
-    # 4. Determine Authority & Enforce Harassment Safety Guardrails
-    no_auto_escalation = False
-    if category == "harassment" or secondary_category == "harassment":
-        category = "harassment"
+    # 2. Grievance Processing: Bypass routing if flagged as inappropriate/irrelevant
+    if is_flagged:
+        summary = None
+        category = "irrelevant"
         secondary_category = None
-        urgency = "high"
-        assigned_authority = "Counseling Cell"
+        urgency = "low"
+        assigned_authority = None
+        initial_authority = None
+        complaint_status = "flagged"
         no_auto_escalation = True
+        sla_deadline = None
+        reasoning = f"Flagged as inappropriate or irrelevant content ({flag_reason}). Not routed to any department authority."
     else:
-        assigned_authority = AUTHORITY_MAP.get(category, "Estate Office")
+        # Auto-summarize grievances exceeding 50 words
+        summary = summarize_complaint(payload.text)
 
-    # 5. Calculate SLA Deadline with DEBUG_TIME_SCALE support
-    sla_delta = get_sla_duration(urgency)
-    sla_deadline = created_at + sla_delta
+        # Call AI Classifier (Gemini 3.8 Flash -> Groq -> Heuristic Fallback)
+        classification = classify_complaint(payload.text)
+        category = classification.get("category", "infrastructure").lower()
+        secondary_category = classification.get("secondary_category")
+        if secondary_category:
+            secondary_category = str(secondary_category).strip().lower()
+        urgency = classification.get("urgency", "medium").lower()
+        reasoning = classification.get("reasoning", "")
+
+        # Determine Authority & Enforce Harassment Safety Guardrails
+        no_auto_escalation = False
+        if category == "harassment" or secondary_category == "harassment":
+            category = "harassment"
+            secondary_category = None
+            urgency = "high"
+            assigned_authority = "Counseling Cell"
+            no_auto_escalation = True
+        else:
+            assigned_authority = AUTHORITY_MAP.get(category, "Estate Office")
+        initial_authority = assigned_authority
+
+        # Calculate SLA Deadline with DEBUG_TIME_SCALE support
+        sla_delta = get_sla_duration(urgency)
+        sla_deadline = created_at + sla_delta
+        complaint_status = "open"
 
     # Generate sequential student ticket ID (e.g. v134_t1, v134_t2)
     ticket_id = None
@@ -684,16 +699,16 @@ def create_complaint(
     else:
         ticket_id = f"anon_t{datetime.utcnow().strftime('%M%S%f')[:8]}"
 
-    # 6. Create Complaint Record (Original full text always stored)
+    # 3. Create Complaint Record (Original full text always stored)
     complaint = Complaint(
         text=payload.text,
         category=category,
         secondary_category=secondary_category,
         summary=summary,
         urgency=urgency,
-        status="open",
+        status=complaint_status,
         assigned_authority=assigned_authority,
-        initial_authority=assigned_authority,
+        initial_authority=initial_authority,
         ticket_id=ticket_id,
         student_email=student_email,
         student_name=student_name,
@@ -707,19 +722,22 @@ def create_complaint(
     db.add(complaint)
     db.flush()
 
-    # 7. Log Activity Entries
-    assigned_email = get_authority_email(assigned_authority)
-    log_details = f"Classified as {category}/{urgency}, routed to {assigned_authority}. Alert email dispatched to {assigned_email}."
-    if secondary_category:
-        sec_auth = AUTHORITY_MAP.get(secondary_category, "Estate Office")
-        sec_email = get_authority_email(sec_auth)
-        log_details += f" Secondary domain '{secondary_category}' routed to {sec_auth} ({sec_email})."
-    if reasoning:
-        log_details += f" Reasoning: {reasoning}"
+    # 4. Log Activity Entries
+    if is_flagged:
+        log_details = f"Flagged as inappropriate or irrelevant ({flag_reason}). Rejected from routing to any authority."
+    else:
+        assigned_email = get_authority_email(assigned_authority)
+        log_details = f"Classified as {category}/{urgency}, routed to {assigned_authority}. Alert email dispatched to {assigned_email}."
+        if secondary_category:
+            sec_auth = AUTHORITY_MAP.get(secondary_category, "Estate Office")
+            sec_email = get_authority_email(sec_auth)
+            log_details += f" Secondary domain '{secondary_category}' routed to {sec_auth} ({sec_email})."
+        if reasoning:
+            log_details += f" Reasoning: {reasoning}"
 
     activity_entry = ActivityLog(
         complaint_id=complaint.id,
-        action="CLASSIFICATION",
+        action="FLAGGED_IRRELEVANT" if is_flagged else "CLASSIFICATION",
         details=log_details,
         timestamp=datetime.utcnow(),
     )
@@ -737,44 +755,45 @@ def create_complaint(
             timestamp=datetime.utcnow()
         ))
 
-    # 8. Commit immediately so data is saved without waiting on external networks
+    # 5. Commit immediately so data is saved without waiting on external networks
     db.commit()
     db.refresh(complaint)
     db.refresh(activity_entry)
 
-    # 9. Asynchronously Dispatch Notification Emails
-    # Primary Authority Notification
-    background_tasks.add_task(
-        send_new_complaint_email,
-        complaint_id=complaint.id,
-        complaint_text=complaint.text,
-        category=complaint.category,
-        secondary_category=complaint.secondary_category,
-        summary=complaint.summary,
-        urgency=complaint.urgency,
-        assigned_authority=complaint.assigned_authority,
-        sla_deadline=complaint.sla_deadline,
-        photo_url=complaint.photo_url,
-        is_secondary=False
-    )
+    # 6. Asynchronously Dispatch Notification Emails to Department Authorities ONLY for legitimate grievances
+    if not is_flagged and assigned_authority:
+        # Primary Authority Notification
+        background_tasks.add_task(
+            send_new_complaint_email,
+            complaint_id=complaint.id,
+            complaint_text=complaint.text,
+            category=complaint.category,
+            secondary_category=complaint.secondary_category,
+            summary=complaint.summary,
+            urgency=complaint.urgency,
+            assigned_authority=complaint.assigned_authority,
+            sla_deadline=complaint.sla_deadline,
+            photo_url=complaint.photo_url,
+            is_secondary=False
+        )
 
-    # Secondary Authority Notification (if secondary category is distinct from primary)
-    if secondary_category:
-        sec_authority = AUTHORITY_MAP.get(secondary_category)
-        if sec_authority and sec_authority != assigned_authority:
-            background_tasks.add_task(
-                send_new_complaint_email,
-                complaint_id=complaint.id,
-                complaint_text=complaint.text,
-                category=complaint.category,
-                secondary_category=complaint.secondary_category,
-                summary=complaint.summary,
-                urgency=complaint.urgency,
-                assigned_authority=sec_authority,
-                sla_deadline=complaint.sla_deadline,
-                photo_url=complaint.photo_url,
-                is_secondary=True
-            )
+        # Secondary Authority Notification (if secondary category is distinct from primary)
+        if secondary_category:
+            sec_authority = AUTHORITY_MAP.get(secondary_category)
+            if sec_authority and sec_authority != assigned_authority:
+                background_tasks.add_task(
+                    send_new_complaint_email,
+                    complaint_id=complaint.id,
+                    complaint_text=complaint.text,
+                    category=complaint.category,
+                    secondary_category=complaint.secondary_category,
+                    summary=complaint.summary,
+                    urgency=complaint.urgency,
+                    assigned_authority=sec_authority,
+                    sla_deadline=complaint.sla_deadline,
+                    photo_url=complaint.photo_url,
+                    is_secondary=True
+                )
 
     # 10. Real-Time WebSocket Broadcast
     if category == "harassment":

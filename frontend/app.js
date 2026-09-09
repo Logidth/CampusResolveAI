@@ -500,9 +500,9 @@ if (complaintForm) {
       }
       document.getElementById("resCategory").innerText = displayCategory;
       document.getElementById("resUrgency").innerHTML = getUrgencyBadge(data.urgency);
-      document.getElementById("resAuthority").innerText = data.assigned_authority || "Student Affairs";
+      document.getElementById("resAuthority").innerText = data.assigned_authority || (data.status === "flagged" ? "None (Flagged)" : "Student Affairs");
       document.getElementById("resStatus").innerHTML = getStatusBadge(data.status);
-      document.getElementById("resSla").innerText = formatDate(data.sla_deadline);
+      document.getElementById("resSla").innerText = data.sla_deadline ? formatDate(data.sla_deadline) : "N/A (Flagged)";
 
       // Render Conduct Warning / Escalation Alert if triggered
       const conductWarningEl = document.getElementById("resConductWarning");

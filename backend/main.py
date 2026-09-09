@@ -579,8 +579,18 @@ def create_complaint(
             except Exception:
                 pass
 
-    # 1. Content Moderation & Three-Warning Student Conduct System
+    # 1. Content Moderation & AI Domain Relevance Verification
     is_flagged, flag_reason = moderate_content(payload.text)
+    classification = {}
+
+    if not is_flagged:
+        # Call AI Classifier (Gemini 3.8 Flash -> Groq -> Heuristic Fallback)
+        classification = classify_complaint(payload.text)
+        detected_category = str(classification.get("category", "")).lower().strip()
+        if detected_category == "irrelevant":
+            is_flagged = True
+            flag_reason = classification.get("reasoning") or "Irrelevant content: text does not relate to any campus grievance category."
+
     conduct_warning_msg = None
     conduct_record = None
 
@@ -644,8 +654,7 @@ def create_complaint(
                 f"CampusResolve is strictly for genuine college grievances. Repeated violations exceeding 3 warnings are reported directly to the Principal ({principal_email})."
             )
 
-    # 2. Grievance Processing: Bypass routing if flagged as inappropriate/irrelevant
-    if is_flagged:
+        # Flagged parameters: STRICTLY DO NOT ROUTE TO ANY DEPARTMENT AUTHORITY
         summary = None
         category = "irrelevant"
         secondary_category = None
@@ -657,11 +666,8 @@ def create_complaint(
         sla_deadline = None
         reasoning = f"Flagged as inappropriate or irrelevant content ({flag_reason}). Not routed to any department authority."
     else:
-        # Auto-summarize grievances exceeding 50 words
+        # Legitimate grievance processing
         summary = summarize_complaint(payload.text)
-
-        # Call AI Classifier (Gemini 3.8 Flash -> Groq -> Heuristic Fallback)
-        classification = classify_complaint(payload.text)
         category = classification.get("category", "infrastructure").lower()
         secondary_category = classification.get("secondary_category")
         if secondary_category:

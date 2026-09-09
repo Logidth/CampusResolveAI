@@ -19,7 +19,7 @@ load_dotenv()
 
 logger = logging.getLogger("CampusResolveAgent")
 
-VALID_CATEGORIES = ["hostel", "mess", "academic", "infrastructure", "harassment"]
+VALID_CATEGORIES = ["hostel", "mess", "academic", "infrastructure", "harassment", "irrelevant"]
 VALID_URGENCIES = ["low", "medium", "high"]
 
 MOCK_MODE = os.getenv("MOCK_MODE", "false").lower() in ["true", "1", "yes"]
@@ -35,6 +35,91 @@ class ComplaintClassification(BaseModel):
     secondary_category: Optional[str] = None
     urgency: str
     reasoning: str
+
+
+# =====================================================================
+# Domain Categorization Keyword Dictionaries
+# =====================================================================
+
+HARASSMENT_KWS = [
+    "harass", "harassed", "harassing", "harassment",
+    "ragging", "ragged", "rag",
+    "bully", "bullied", "bullying", "bullies",
+    "threat", "threats", "threatened", "threatening",
+    "abuse", "abused", "abusing", "abusive",
+    "safety", "stalk", "stalked", "stalking", "stalker",
+    "inappropriate", "violence", "violent", "assault",
+    "eve-teasing", "mental health", "depression", "anxiety",
+    "counselor", "counseling", "suicide", "crying"
+]
+
+INFRA_KWS = [
+    # Furniture & Carpentry
+    "bench", "benches", "desk", "desks", "table", "tables", "chair", "chairs",
+    "podium", "board", "blackboard", "whiteboard", "greenboard", "stage",
+    "furniture", "broken bench", "broken chair", "broken desk", "broken table",
+    # Campus Physical Spaces, Classrooms, Labs & Buildings
+    "campus", "college", "classroom", "classrooms", "seminar hall",
+    "auditorium", "library", "lab", "labs", "laboratory", "mech lab", "civil lab",
+    "ece lab", "cse lab", "corridor", "pathway", "road", "parking", "ground",
+    "campus gate", "security gate", "main building", "admin building", "admin block",
+    "building", "c101", "c102", "c201", "c301", "c405", "a101", "a102", "b101",
+    "b201", "b301", "lh1", "lh2", "lh3",
+    # Maintenance, Repairs & Closures (Estate Works)
+    "broken", "damaged", "repair", "repairs", "not working", "not closed", "is not closed",
+    "open", "door open", "door not closed", "door", "doors", "window", "windows",
+    "lock", "locks", "unlocked", "broken lock", "handle", "hinge", "glass",
+    "ceiling", "roof", "floor", "tiles", "wall", "plumbing", "paint", "painting", "civil works",
+    # Electrical & Fixtures
+    "lift", "lifts", "elevator", "elevators", "electricity", "power cut",
+    "power failure", "voltage", "generator", "sparking", "switch", "switches",
+    "switchboard", "socket", "wire", "wires", "wiring", "light", "lights", "tube light",
+    "fan", "fans", "ac", "air conditioner", "air conditioning", "projector",
+    "projectors", "audio", "mic", "speaker", "wifi", "lan", "network", "estate office", "estate"
+]
+
+HOSTEL_KWS = [
+    # Explicit Hostel Identifiers & Living Blocks
+    "hostel", "hostels", "dorm", "dorms", "dormitory", "warden",
+    "h-block", "a-block", "b-block", "d-block", "e-block", "f-block", "g-block",
+    "h block", "a block", "b block", "d block", "e block", "f block", "g block",
+    "hostel block", "boys hostel", "girls hostel", "ladies hostel", "mens hostel",
+    "hostel room", "roommate", "roommates", "cot", "cots", "mattress", "cupboard", "almirah",
+    "curfew", "in-time", "out-time", "night out", "gate pass", "hostel gate", "warden office",
+    # Water Supply & Sanitation in Hostels
+    "water", "water issue", "water problem", "water supply", "drinking water", "hot water", "cold water", "water shortage",
+    "insufficient water", "no water in hostel", "hostel water", "tap", "taps",
+    "washroom", "washrooms", "bathroom", "bathrooms", "toilet", "toilets", "flush",
+    "drain", "drainage", "shower", "showers", "geyser", "geysers", "sweeper",
+    "hostel cleaning", "hostel cleanliness", "housekeeping in hostel"
+]
+
+MESS_KWS = [
+    "mess", "food", "meal", "meals", "dinner", "lunch", "breakfast",
+    "canteen", "diet", "tiffin", "dining", "catering", "cook", "cooked",
+    "uncooked", "rotten", "hygiene in mess", "stale", "taste", "mess food",
+    "dining hall", "mess hall", "mess staff", "mess bill", "caterer", "insect in food",
+    "curry", "rice", "chapati", "snack", "snacks", "tea", "coffee", "cafeteria"
+]
+
+ACADEMIC_KWS = [
+    "academic", "academics", "exam", "exams", "examination", "examinations",
+    "grade", "grades", "grading", "mark", "marks", "result", "results",
+    "attendance", "internal", "internals", "gpa", "cgpa", "re-evaluation",
+    "revaluation", "professor", "professors", "faculty", "teacher", "teachers",
+    "lecture", "lectures", "course", "courses", "curriculum", "syllabus",
+    "assignment", "assignments", "semester", "timetable", "subject", "credits", "exam cell",
+    "fee", "fees", "exam fee", "semester fee", "tuition fee", "hall ticket", "hallticket",
+    "fine", "fines", "arrear", "arrears", "supplementary", "marksheet", "transcript",
+    "schedule", "scheduled", "cia", "cia-i", "cia-ii", "cia-1", "cia-2"
+]
+
+GENERIC_GRIEVANCE_INDICATORS = [
+    "issue", "issues", "problem", "problems", "complaint", "complaints", "grievance", "grievances",
+    "broken", "damage", "damaged", "repair", "repairs", "not working", "faulty", "failed", "failure",
+    "leak", "leaking", "leakage", "dirty", "unclean", "stink", "smell", "rotten",
+    "shortage", "insufficient", "hazard", "danger", "urgent", "emergency", "noise", "clean"
+]
 
 
 def _word_match(keywords: list, text: str) -> bool:
@@ -66,22 +151,12 @@ def _heuristic_mock_classify(text: str) -> Dict[str, Any]:
     Deterministic & safety-first triage classifier using weighted keyword density matching.
     Supports multi-category triage (secondary_category set if runner-up score is within 30% of top score).
     Harassment is always the sole/priority category (never paired with a secondary).
+    If no campus grievance keywords are present, classifies as 'irrelevant'.
     """
     lower_text = text.lower()
 
     # 1. Immediate Safety / Harassment Check (Highest Priority -> Counseling Cell)
-    harassment_kws = [
-        "harass", "harassed", "harassing", "harassment",
-        "ragging", "ragged", "rag",
-        "bully", "bullied", "bullying", "bullies",
-        "threat", "threats", "threatened", "threatening",
-        "abuse", "abused", "abusing", "abusive",
-        "safety", "stalk", "stalked", "stalking", "stalker",
-        "inappropriate", "violence", "violent", "assault",
-        "eve-teasing", "mental health", "depression", "anxiety",
-        "counselor", "counseling", "suicide", "crying"
-    ]
-    if _word_match(harassment_kws, lower_text):
+    if _word_match(HARASSMENT_KWS, lower_text):
         return {
             "category": "harassment",
             "secondary_category": None,
@@ -89,79 +164,12 @@ def _heuristic_mock_classify(text: str) -> Dict[str, Any]:
             "reasoning": "Identified safety/harassment keywords; flagged for immediate Counseling Cell intervention."
         }
 
-    # 2. Domain Categorization Keyword Dictionaries
-
-    # Campus Infrastructure, Furniture, Classrooms, Labs & Works (Handled by Estate Office)
-    infra_kws = [
-        # Furniture & Carpentry
-        "bench", "benches", "desk", "desks", "table", "tables", "chair", "chairs",
-        "podium", "board", "blackboard", "whiteboard", "greenboard", "stage",
-        "furniture", "broken bench", "broken chair", "broken desk", "broken table",
-        # Campus Physical Spaces, Classrooms, Labs & Buildings
-        "campus", "college", "classroom", "classrooms", "seminar hall",
-        "auditorium", "library", "lab", "labs", "laboratory", "mech lab", "civil lab",
-        "ece lab", "cse lab", "corridor", "pathway", "road", "parking", "ground",
-        "campus gate", "security gate", "main building", "admin building", "admin block",
-        "building", "c101", "c102", "c201", "c301", "c405", "a101", "a102", "b101",
-        "b201", "b301", "lh1", "lh2", "lh3",
-        # Maintenance, Repairs & Closures (Estate Works)
-        "broken", "damaged", "repair", "repairs", "not working", "not closed", "is not closed",
-        "open", "door open", "door not closed", "door", "doors", "window", "windows",
-        "lock", "locks", "unlocked", "broken lock", "handle", "hinge", "glass",
-        "ceiling", "roof", "floor", "tiles", "wall", "plumbing", "paint", "painting", "civil works",
-        # Electrical & Fixtures
-        "lift", "lifts", "elevator", "elevators", "electricity", "power cut",
-        "power failure", "voltage", "generator", "sparking", "switch", "switches",
-        "switchboard", "socket", "wire", "wires", "wiring", "light", "lights", "tube light",
-        "fan", "fans", "ac", "air conditioner", "air conditioning", "projector",
-        "projectors", "audio", "mic", "speaker", "wifi", "lan", "network", "estate office", "estate"
-    ]
-
-    # Explicit Hostel Living & Resident Life (Handled by Warden)
-    hostel_kws = [
-        # Explicit Hostel Identifiers & Living Blocks
-        "hostel", "hostels", "dorm", "dorms", "dormitory", "warden",
-        "h-block", "a-block", "b-block", "d-block", "e-block", "f-block", "g-block",
-        "h block", "a block", "b block", "d block", "e block", "f block", "g block",
-        "hostel block", "boys hostel", "girls hostel", "ladies hostel", "mens hostel",
-        "hostel room", "roommate", "roommates", "cot", "cots", "mattress", "cupboard", "almirah",
-        "curfew", "in-time", "out-time", "night out", "gate pass", "hostel gate", "warden office",
-        # Water Supply & Sanitation in Hostels
-        "water", "water issue", "water problem", "water supply", "drinking water", "hot water", "cold water", "water shortage",
-        "insufficient water", "no water in hostel", "hostel water", "tap", "taps",
-        "washroom", "washrooms", "bathroom", "bathrooms", "toilet", "toilets", "flush",
-        "drain", "drainage", "shower", "showers", "geyser", "geysers", "sweeper",
-        "hostel cleaning", "hostel cleanliness", "housekeeping in hostel"
-    ]
-
-    # Mess & Food Dining (Handled by Mess Committee)
-    mess_kws = [
-        "mess", "food", "meal", "meals", "dinner", "lunch", "breakfast",
-        "canteen", "diet", "tiffin", "dining", "catering", "cook", "cooked",
-        "uncooked", "rotten", "hygiene in mess", "stale", "taste", "mess food",
-        "dining hall", "mess hall", "mess staff", "mess bill", "caterer", "insect in food",
-        "curry", "rice", "chapati", "snack", "snacks", "tea", "coffee", "cafeteria"
-    ]
-
-    # Academic, Examination & Fee Matters (Handled by Exam Cell Admin)
-    academic_kws = [
-        "academic", "academics", "exam", "exams", "examination", "examinations",
-        "grade", "grades", "grading", "mark", "marks", "result", "results",
-        "attendance", "internal", "internals", "gpa", "cgpa", "re-evaluation",
-        "revaluation", "professor", "professors", "faculty", "teacher", "teachers",
-        "lecture", "lectures", "course", "courses", "curriculum", "syllabus",
-        "assignment", "assignments", "semester", "timetable", "subject", "credits", "exam cell",
-        "fee", "fees", "exam fee", "semester fee", "tuition fee", "hall ticket", "hallticket",
-        "fine", "fines", "arrear", "arrears", "supplementary", "marksheet", "transcript",
-        "schedule", "scheduled", "cia", "cia-i", "cia-ii", "cia-1", "cia-2"
-    ]
-
-    # Calculate weighted scores
+    # 2. Calculate weighted scores
     scores = {
-        "infrastructure": _count_matches(infra_kws, lower_text) * 4,
-        "hostel": _count_matches(hostel_kws, lower_text) * 4,
-        "mess": _count_matches(mess_kws, lower_text) * 4,
-        "academic": _count_matches(academic_kws, lower_text) * 4
+        "infrastructure": _count_matches(INFRA_KWS, lower_text) * 4,
+        "hostel": _count_matches(HOSTEL_KWS, lower_text) * 4,
+        "mess": _count_matches(MESS_KWS, lower_text) * 4,
+        "academic": _count_matches(ACADEMIC_KWS, lower_text) * 4
     }
 
     # Store base keyword scores for multi-category runner-up evaluation
@@ -180,8 +188,20 @@ def _heuristic_mock_classify(text: str) -> Dict[str, Any]:
     if top_score > 0:
         category = top_cat
     else:
-        # Default fallback: physical repairs/breakages go to infrastructure
-        category = "infrastructure" if ("broken" in lower_text or "damaged" in lower_text or "room" in lower_text or "campus" in lower_text) else "hostel"
+        # Check if generic repair words are present with physical campus spaces
+        if any(w in lower_text for w in ["broken", "damaged", "repair", "not working", "leakage", "leak"]):
+            category = "infrastructure"
+        else:
+            # Completely unrelated to campus grievance categories
+            category = "irrelevant"
+
+    if category == "irrelevant":
+        return {
+            "category": "irrelevant",
+            "secondary_category": None,
+            "urgency": "low",
+            "reasoning": "No actionable campus grievance keywords found in submission."
+        }
 
     # Multi-category heuristic: runner-up within 30% of top score based on keyword match density
     sorted_base = sorted(base_scores.items(), key=lambda x: x[1], reverse=True)
@@ -242,10 +262,12 @@ def classify_complaint(text: str) -> Dict[str, Any]:
         "- 'mess': Food quality, mess dining, unhygienic meals, catering, canteen (assigned to Mess Committee).\n"
         "- 'academic': Marks, semester exams, grading errors, exam fees, tuition fees, semester registration, hall tickets, revaluation, syllabus, attendance (assigned to Exam Cell Admin).\n"
         "- 'harassment': Bullying, ragging, stalking, abuse, safety disclosures (assigned to Counseling Cell, urgency always high).\n"
+        "- 'irrelevant': Casual chatter (e.g. 'aswath is my friend'), social greetings (e.g. 'happy birthday'), jokes, sports, or random text that does NOT describe an actionable campus grievance.\n"
         "Multi-Category Rules:\n"
         "- 'harassment' must ALWAYS be the sole primary category when detected. Never pair harassment with a secondary category or demote it.\n"
+        "- 'irrelevant' must ALWAYS be the sole primary category if the text does not contain a legitimate campus grievance. Never pair irrelevant with a secondary category.\n"
         "- For non-harassment grievances, set 'secondary_category' ONLY if the complaint clearly spans two distinct domains (e.g., hostel room + broken electrical infrastructure, or mess food + hostel dining hall). Otherwise set secondary_category to null.\n"
-        "Allowed categories: 'infrastructure', 'hostel', 'mess', 'academic', 'harassment'.\n"
+        "Allowed categories: 'infrastructure', 'hostel', 'mess', 'academic', 'harassment', 'irrelevant'.\n"
         "Allowed urgencies: 'low', 'medium', 'high'."
     )
 
@@ -394,7 +416,9 @@ PROFANITY_KEYWORDS = [
     "bitch", "bitches", "asshole", "assholes",
     "bastard", "bastards", "moron", "morons",
     "idiot", "idiots", "scumbag", "scumbags",
-    "loser", "losers", "dick", "dicks", "crap", "damn"
+    "loser", "losers", "dick", "dicks", "crap", "damn",
+    "stupid", "dumb", "shut up", "wtf", "stfu", "hate you",
+    "suck", "sucks", "nude", "porn", "sex", "piss off"
 ]
 
 IRRELEVANT_PATTERNS = [
@@ -405,10 +429,15 @@ IRRELEVANT_PATTERNS = [
     r"\bhappy\s+diwali\b", r"\bhappy\s+pongal\b", r"\bmerry\s+christmas\b", r"\bhappy\s+holi\b",
     r"\bgood\s+morning\b", r"\bgood\s+afternoon\b", r"\bgood\s+evening\b", r"\bgood\s+night\b",
     r"\bhave\s+a\s+(?:great|nice|good)\s+day\b",
-    # Casual conversation & AI assistant queries
+    # Casual conversation, social statements, friendships & relationships
     r"\bhow\s+are\s+you\b", r"\bwhat(?:'s|\s+is)\s+up\b", r"\bwassup\b", r"\bsup\s+bro\b",
     r"\btell\s+me\s+a\s+joke\b", r"\bsing\s+a\s+song\b", r"\bwho\s+are\s+you\b",
     r"\bi\s+love\s+you\b", r"\bmarry\s+me\b",
+    r"\b(?:[a-zA-Z]+\s+)?(?:is|was|are|were)\s+(?:my|our)\s+(?:best\s+)?(?:friend|buddy|pal|enemy|homie|roomie|classmate|bro|sister|brother|gf|bf|girlfriend|boyfriend)\b",
+    r"\bmy\s+(?:friend|best\s+friend|buddy|pal|name)\s+(?:is|are)\b",
+    r"\bwe\s+are\s+(?:friends|best\s+friends|buddies)\b",
+    r"\b(?:he|she|they)\s+is\s+(?:good|bad|nice|awesome|great|cute|smart|kind|cool)\b",
+    r"\b(?:i|we)\s+(?:love|like|hate|miss)\s+(?:you|him|her|them|[a-zA-Z]+)\b",
     # Test & dummy spam
     r"\btest(?:ing)?\s+(?:123|test|check)\b", r"\bhello\s+world\b",
     r"\blorem\s+ipsum\b", r"\bbla\s+bla\b", r"\bblah\s+blah\b"
@@ -421,6 +450,7 @@ def moderate_content(text: str) -> Tuple[bool, str]:
     Covers:
     - Profanity, slurs, or vulgar abuse
     - Irrelevant text like 'happy birthday', social greetings, jokes, pranks, test spam
+    - Casual statements ('aswath is my friend', 'i like pizza') with zero connection to campus domains
     - Irrelevant paragraphs wholly unrelated to university complaints
     Returns: (is_flagged: bool, reason: str)
     """
@@ -442,6 +472,20 @@ def moderate_content(text: str) -> Tuple[bool, str]:
     words = lower_text.split()
     if len(words) <= 2 and all(w in ["hi", "hello", "hey", "test", "testing", "ok", "okay", "bye", "cool", "yo", "sup", "thanks"] for w in words):
         return True, "Irrelevant content: Casual greeting or test text does not state a campus grievance"
+
+    # 4. Universal Domain Relevance & Absence Check
+    # A genuine college grievance MUST have at least one keyword matching campus domains
+    # (infrastructure, hostel, mess, academic, safety/harassment).
+    has_category_kw = (
+        _count_matches(INFRA_KWS, lower_text) > 0 or
+        _count_matches(HOSTEL_KWS, lower_text) > 0 or
+        _count_matches(MESS_KWS, lower_text) > 0 or
+        _count_matches(ACADEMIC_KWS, lower_text) > 0 or
+        _word_match(HARASSMENT_KWS, lower_text)
+    )
+
+    if not has_category_kw:
+        return True, "Irrelevant content: Submission has no connection to campus infrastructure, hostel, mess, academic affairs, or student safety."
 
     # 4. Gemini AI Compliance & Irrelevant Paragraph Evaluation
     if not MOCK_MODE and GEMINI_API_KEY and GEMINI_API_KEY != "your_gemini_api_key_here":

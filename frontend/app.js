@@ -610,7 +610,7 @@ async function loadComplaintDetails(id) {
       }
       document.getElementById("trackCategory").innerText = trackCatDisplay;
       document.getElementById("trackUrgency").innerHTML = getUrgencyBadge(data.urgency);
-      document.getElementById("trackAuthority").innerText = data.assigned_authority || "Unassigned";
+      document.getElementById("trackAuthority").innerText = data.assigned_authority || (data.status === "flagged" ? "None (Flagged)" : "Unassigned");
       document.getElementById("trackEscalation").innerText = `Level ${data.escalation_level}`;
       document.getElementById("trackSla").innerText = formatDate(data.sla_deadline);
       document.getElementById("trackResolvedAt").innerText = data.resolved_at ? formatDate(data.resolved_at) : "Open / In Progress";

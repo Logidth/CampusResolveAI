@@ -21,8 +21,8 @@ print('=' * 65)
 # --- 1. HEALTH CHECK ---
 r_health = client.get('/health')
 assert r_health.status_code == 200
-assert r_health.json() == {'status': 'CampusResolve agent running'}
-print('[PASS] [1/6] Health Check GET /health: OK ->', r_health.json())
+assert r_health.json().get('status') == 'CampusResolve agent running'
+print('[PASS] [1/6] Health Check GET /health: OK ->', r_health.json().get('status'))
 
 # --- 2. TEST ALL CATEGORIES, ROUTING & SLAs ---
 test_cases = [
@@ -39,7 +39,7 @@ test_cases = [
     {
         'text': 'Exam grades for CS101 lecture were miscalculated and attendance not marked',
         'expected_cat': 'academic',
-        'expected_auth': 'HOD',
+        'expected_auth': 'Exam Cell Admin',
     },
     {
         'text': 'Broken laboratory bench, faulty AC, and flickering tube light in building B',

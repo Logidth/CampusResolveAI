@@ -1,0 +1,445 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>CampusResolve — Principal Executive Analytics</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="style.css">
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <script src="config.js"></script>
+  <style>
+    .principal-header-card {
+      background: linear-gradient(135deg, #1e1b4b 0%, #0f172a 60%, #1e293b 100%);
+      color: #ffffff;
+      border-radius: var(--radius-lg);
+      padding: 2.25rem;
+      margin-bottom: 2rem;
+      box-shadow: 0 12px 30px -8px rgba(30, 27, 75, 0.35);
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      flex-wrap: wrap;
+      gap: 1.5rem;
+      border: 1px solid rgba(255, 255, 255, 0.1);
+    }
+    .principal-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.4rem;
+      padding: 0.4rem 0.9rem;
+      border-radius: 9999px;
+      font-size: 0.75rem;
+      font-weight: 700;
+      letter-spacing: 0.05em;
+      text-transform: uppercase;
+      background: rgba(168, 85, 247, 0.2);
+      border: 1px solid rgba(192, 132, 252, 0.4);
+      color: #e9d5ff;
+    }
+    .kpi-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+      gap: 1.25rem;
+      margin-bottom: 2rem;
+    }
+    .kpi-card {
+      background: var(--bg-card);
+      border: 1px solid var(--border-color);
+      border-radius: var(--radius-lg);
+      padding: 1.35rem 1.5rem;
+      box-shadow: var(--shadow-sm);
+      transition: var(--transition);
+      position: relative;
+      overflow: hidden;
+    }
+    .kpi-card:hover {
+      box-shadow: var(--shadow-md);
+      transform: translateY(-2px);
+    }
+    .kpi-card::before {
+      content: "";
+      position: absolute;
+      top: 0; left: 0; right: 0;
+      height: 4px;
+      background: var(--primary);
+    }
+    .kpi-card.kpi-purple::before { background: #8b5cf6; }
+    .kpi-card.kpi-green::before { background: #10b981; }
+    .kpi-card.kpi-amber::before { background: #f59e0b; }
+    .kpi-card.kpi-red::before { background: #ef4444; }
+    .kpi-card.kpi-blue::before { background: #3b82f6; }
+
+    .kpi-val {
+      font-size: 2rem;
+      font-weight: 800;
+      color: var(--text-main);
+      line-height: 1.1;
+      margin: 0.4rem 0 0.2rem 0;
+      letter-spacing: -0.02em;
+    }
+    .kpi-lbl {
+      font-size: 0.8rem;
+      color: var(--text-muted);
+      text-transform: uppercase;
+      font-weight: 700;
+      letter-spacing: 0.05em;
+    }
+    .kpi-sub {
+      font-size: 0.775rem;
+      color: var(--text-muted);
+      margin-top: 0.35rem;
+    }
+
+    .chart-container-card {
+      background: var(--bg-card);
+      border: 1px solid var(--border-color);
+      border-radius: var(--radius-lg);
+      padding: 1.75rem;
+      margin-bottom: 2rem;
+      box-shadow: var(--shadow-sm);
+    }
+
+    .underperforming-alert {
+      background: #fef2f2;
+      border: 1px solid #fca5a5;
+      border-left: 5px solid #dc2626;
+      border-radius: var(--radius-md);
+      padding: 1.1rem 1.4rem;
+      margin-bottom: 2rem;
+      display: flex;
+      align-items: flex-start;
+      gap: 1rem;
+    }
+
+    .table-container {
+      background: var(--bg-card);
+      border: 1px solid var(--border-color);
+      border-radius: var(--radius-lg);
+      overflow: hidden;
+      box-shadow: var(--shadow-sm);
+      margin-bottom: 2rem;
+    }
+
+    .table th {
+      background: #f8fafc;
+      font-weight: 700;
+      font-size: 0.75rem;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      color: var(--text-muted);
+      padding: 1rem 1.2rem;
+      border-bottom: 1px solid var(--border-color);
+    }
+    .table td {
+      padding: 1rem 1.2rem;
+      vertical-align: middle;
+      border-bottom: 1px solid var(--border-color);
+      font-size: 0.9rem;
+    }
+    .table tfoot tr {
+      background: #f8fafc;
+      font-weight: 700;
+    }
+    .table tfoot td {
+      border-top: 2px solid var(--border-color);
+      border-bottom: none;
+      font-size: 0.925rem;
+    }
+
+    .row-highlight-danger {
+      background-color: rgba(254, 242, 242, 0.65) !important;
+    }
+    .row-highlight-warning {
+      background-color: rgba(255, 251, 235, 0.65) !important;
+    }
+
+    .rate-bar-bg {
+      width: 100%;
+      height: 7px;
+      background: #e2e8f0;
+      border-radius: 9999px;
+      overflow: hidden;
+      margin-top: 5px;
+    }
+    .rate-bar-fill {
+      height: 100%;
+      border-radius: 9999px;
+      transition: width 0.6s ease;
+    }
+
+    .status-badge-critical {
+      background: #fee2e2;
+      color: #991b1b;
+      border: 1px solid #f87171;
+      font-weight: 700;
+      font-size: 0.75rem;
+      padding: 0.25rem 0.65rem;
+      border-radius: 9999px;
+      display: inline-flex;
+      align-items: center;
+      gap: 0.3rem;
+    }
+    .status-badge-warning {
+      background: #fef3c7;
+      color: #92400e;
+      border: 1px solid #fcd34d;
+      font-weight: 700;
+      font-size: 0.75rem;
+      padding: 0.25rem 0.65rem;
+      border-radius: 9999px;
+      display: inline-flex;
+      align-items: center;
+      gap: 0.3rem;
+    }
+    .status-badge-optimal {
+      background: #d1fae5;
+      color: #065f46;
+      border: 1px solid #6ee7b7;
+      font-weight: 700;
+      font-size: 0.75rem;
+      padding: 0.25rem 0.65rem;
+      border-radius: 9999px;
+      display: inline-flex;
+      align-items: center;
+      gap: 0.3rem;
+    }
+  </style>
+</head>
+<body>
+
+  <!-- Top Navigation Bar -->
+  <header>
+    <div class="nav-container">
+      <a href="index.html" class="brand">
+        <div class="brand-icon">CR</div>
+        <div class="brand-title">Campus<span>Resolve</span></div>
+      </a>
+      <nav class="nav-links">
+        <a href="index.html" class="nav-link">🎓 Student Portal</a>
+        <a href="dashboard.html" class="nav-link">📋 Authority Queue</a>
+        <a href="admin.html" class="nav-link">⚙️ Admin Console</a>
+        <a href="principal.html" class="nav-link active" style="color: #8b5cf6; font-weight: 700;">📊 Principal Analytics</a>
+      </nav>
+    </div>
+  </header>
+
+  <main class="container" style="padding-top: 2rem; padding-bottom: 3rem;">
+
+    <!-- ======================================================= -->
+    <!-- VIEW A: PRINCIPAL SIGN-IN SCREEN (Visible when not logged in) -->
+    <!-- ======================================================= -->
+    <div id="principalAccessDeniedAlert" style="display: none; padding: 2rem 0;">
+      <div style="max-width: 480px; margin: 0 auto; background: var(--bg-card); border: 1px solid var(--border-color); border-radius: var(--radius-lg); padding: 2.5rem; box-shadow: var(--shadow-md); text-align: center;">
+        <div style="width: 60px; height: 60px; margin: 0 auto 1rem auto; background: #f5f3ff; color: #7c3aed; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 1.8rem; border: 1px solid #ddd6fe;">
+          🏛️
+        </div>
+        <h1 style="font-size: 1.45rem; font-weight: 800; color: var(--text-main); margin-bottom: 0.35rem;">
+          Principal Executive Sign In
+        </h1>
+        <p style="color: var(--text-muted); font-size: 0.85rem; margin-bottom: 1.5rem;">
+          Sign in with apex executive credentials (<code>principal</code>) to access university-wide grievance analytics, departmental velocity, and escalation audits.
+        </p>
+
+        <div id="principalInlineLoginError" style="display: none; background: #fef2f2; border: 1px solid #fecaca; color: #dc2626; padding: 0.75rem 1rem; border-radius: var(--radius-sm); font-size: 0.85rem; margin-bottom: 1.25rem; text-align: left;"></div>
+
+        <form id="principalInlineLoginForm" style="text-align: left;">
+          <div class="form-group" style="margin-bottom: 1rem;">
+            <label for="principalInlineUsername" style="display: block; font-weight: 600; font-size: 0.85rem; margin-bottom: 0.35rem; color: var(--text-main);">Username or Official Email</label>
+            <input type="text" id="principalInlineUsername" class="form-control" placeholder="principal" value="principal" required style="width: 100%;">
+          </div>
+          <div class="form-group" style="margin-bottom: 1.25rem;">
+            <label for="principalInlinePassword" style="display: block; font-weight: 600; font-size: 0.85rem; margin-bottom: 0.35rem; color: var(--text-main);">Password</label>
+            <input type="password" id="principalInlinePassword" class="form-control" placeholder="Enter Principal password" value="principal123" required style="width: 100%;">
+          </div>
+          <button type="submit" id="principalInlineLoginBtn" class="btn btn-primary btn-full" style="width: 100%; padding: 0.75rem; font-weight: 700; background: #7c3aed; border-color: #6d28d9;">
+            🔐 Sign In as Principal & View Analytics
+          </button>
+        </form>
+
+        <div style="margin-top: 1.5rem; padding-top: 1.25rem; border-top: 1px solid var(--border-color); font-size: 0.8rem; color: var(--text-muted); display: flex; justify-content: space-between;">
+          <a href="dashboard.html" style="color: var(--primary); font-weight: 600; text-decoration: none;">Operational Authority Portal</a>
+          <a href="admin.html" style="color: var(--text-muted); text-decoration: none;">Central Admin</a>
+        </div>
+      </div>
+    </div>
+
+    <!-- ======================================================= -->
+    <!-- VIEW B: AUTHENTICATED PRINCIPAL ANALYTICS DASHBOARD -->
+    <!-- ======================================================= -->
+    <div id="principalMainContent" style="display: none;">
+
+      <!-- Principal Executive Identity Banner -->
+      <div class="principal-header-card">
+        <div>
+          <div class="principal-badge">
+            🏛️ Institutional Apex Oversight & Accountability
+          </div>
+          <h1 style="font-size: 1.85rem; font-weight: 800; margin: 0.6rem 0 0.3rem 0; letter-spacing: -0.02em;">
+            Principal Executive Analytics Dashboard
+          </h1>
+          <p style="color: #cbd5e1; font-size: 0.92rem; max-width: 650px; margin: 0;">
+            Institutional audit of grievance intake, departmental resolution efficiency, autonomous SLA escalations, and student dispute appeals.
+          </p>
+          <div style="margin-top: 0.75rem; font-size: 0.82rem; color: #a5b4fc; font-family: var(--font-mono);">
+            Authenticated as: <strong>Dr. K. S. Pillai</strong> (<code>717824v132@kce.ac.in</code>)
+          </div>
+        </div>
+
+        <div style="display: flex; gap: 0.75rem; align-items: center; flex-wrap: wrap;">
+          <button id="btnRefreshAnalytics" class="btn btn-sm" style="background: rgba(255, 255, 255, 0.15); color: #fff; border: 1px solid rgba(255, 255, 255, 0.25); font-weight: 600;">
+            🔄 Refresh Analytics
+          </button>
+          <button onclick="window.print()" class="btn btn-sm" style="background: rgba(255, 255, 255, 0.15); color: #fff; border: 1px solid rgba(255, 255, 255, 0.25); font-weight: 600;">
+            🖨️ Export / Print
+          </button>
+          <button id="principalLogoutBtn" class="btn btn-sm" style="background: rgba(239, 68, 68, 0.2); color: #fca5a5; border: 1px solid rgba(248, 113, 113, 0.4); font-weight: 600;">
+            🚪 Sign Out
+          </button>
+        </div>
+      </div>
+
+      <!-- Underperforming Departments Alert Banner (Dynamic) -->
+      <div id="underperformingAlertBox" class="underperforming-alert" style="display: none;">
+        <div style="font-size: 1.8rem; line-height: 1;">⚠️</div>
+        <div>
+          <h3 style="font-size: 1rem; font-weight: 700; color: #991b1b; margin-bottom: 0.25rem;">
+            Executive Attention Required: Underperforming Departments Identified
+          </h3>
+          <div id="underperformingDepartmentsList" style="font-size: 0.875rem; color: #b91c1c; line-height: 1.4;">
+            <!-- Injected dynamically -->
+          </div>
+        </div>
+      </div>
+
+      <!-- KPI Executive Metric Cards -->
+      <div class="kpi-grid">
+        <div class="kpi-card kpi-purple">
+          <div class="kpi-lbl">Total Raised</div>
+          <div id="kpiTotalRaised" class="kpi-val">0</div>
+          <div class="kpi-sub">Total student grievances lodged</div>
+        </div>
+
+        <div class="kpi-card kpi-green">
+          <div class="kpi-lbl">Resolved Rate</div>
+          <div id="kpiResolutionRate" class="kpi-val" style="color: #059669;">0%</div>
+          <div id="kpiTotalResolved" class="kpi-sub">0 resolved tickets</div>
+        </div>
+
+        <div class="kpi-card kpi-amber">
+          <div class="kpi-lbl">SLA Escalations</div>
+          <div id="kpiTotalEscalated" class="kpi-val" style="color: #d97706;">0</div>
+          <div class="kpi-sub">Level 1 & Level 2 breaches</div>
+        </div>
+
+        <div class="kpi-card kpi-red">
+          <div class="kpi-lbl">Disputed to Principal</div>
+          <div id="kpiTotalDisputed" class="kpi-val" style="color: #dc2626;">0</div>
+          <div class="kpi-sub">Student appeals & fake resolutions</div>
+        </div>
+
+        <div class="kpi-card kpi-blue">
+          <div class="kpi-lbl">Avg Resolution Time</div>
+          <div id="kpiAvgTime" class="kpi-val" style="color: #2563eb;">0.0h</div>
+          <div class="kpi-sub">Hours from intake to resolution</div>
+        </div>
+      </div>
+
+      <!-- Visual Analytics Section (Chart.js) -->
+      <div style="display: grid; grid-template-columns: 2fr 1fr; gap: 1.5rem; margin-bottom: 2rem;">
+        
+        <!-- Primary Bar Chart: Raised vs Resolved -->
+        <div class="chart-container-card" style="margin-bottom: 0;">
+          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1.25rem;">
+            <div>
+              <h2 style="font-size: 1.15rem; font-weight: 700; color: var(--text-main); margin-bottom: 0.2rem;">
+                📊 Grievance Volume: Raised vs. Resolved per Authority
+              </h2>
+              <p style="font-size: 0.8rem; color: var(--text-muted); margin: 0;">
+                Direct comparative workload and completion rate across initial assigned departments.
+              </p>
+            </div>
+            <span class="badge" style="background: #f1f5f9; color: var(--text-muted); font-size: 0.75rem;">Live Computed</span>
+          </div>
+          <div style="position: relative; height: 320px; width: 100%;">
+            <canvas id="authorityBarChart"></canvas>
+          </div>
+        </div>
+
+        <!-- Secondary Chart: Resolution Rate Benchmark -->
+        <div class="chart-container-card" style="margin-bottom: 0;">
+          <div style="margin-bottom: 1.25rem;">
+            <h2 style="font-size: 1.15rem; font-weight: 700; color: var(--text-main); margin-bottom: 0.2rem;">
+              🎯 Department Health
+            </h2>
+            <p style="font-size: 0.8rem; color: var(--text-muted); margin: 0;">
+              Resolution rate % against 50% minimum institutional benchmark.
+            </p>
+          </div>
+          <div style="position: relative; height: 320px; width: 100%;">
+            <canvas id="resolutionRateChart"></canvas>
+          </div>
+        </div>
+
+      </div>
+
+      <!-- Authority Breakdown Table -->
+      <div class="table-container">
+        <div style="padding: 1.25rem 1.5rem; border-bottom: 1px solid var(--border-color); display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 1rem;">
+          <div>
+            <h2 style="font-size: 1.2rem; font-weight: 700; color: var(--text-main); margin-bottom: 0.25rem;">
+              🏛️ Authority-Wise Performance Report
+            </h2>
+            <p style="font-size: 0.825rem; color: var(--text-muted); margin: 0;">
+              Grouped by initial authority originally assigned. Sorted by total raised descending.
+            </p>
+          </div>
+          <div style="display: flex; align-items: center; gap: 0.75rem; font-size: 0.8rem;">
+            <span style="display: flex; align-items: center; gap: 0.35rem;">
+              <span style="width: 10px; height: 10px; background: #fee2e2; border: 1px solid #ef4444; border-radius: 2px;"></span>
+              &lt; 50% Rate (Critical)
+            </span>
+            <span style="display: flex; align-items: center; gap: 0.35rem;">
+              <span style="width: 10px; height: 10px; background: #fef3c7; border: 1px solid #f59e0b; border-radius: 2px;"></span>
+              High Resolution Time
+            </span>
+          </div>
+        </div>
+
+        <div style="overflow-x: auto;">
+          <table class="table" style="margin: 0; width: 100%;">
+            <thead>
+              <tr>
+                <th>Authority / Department</th>
+                <th style="text-align: right;">Total Raised</th>
+                <th style="text-align: right;">Resolved</th>
+                <th style="text-align: right;">Escalated (&gt;0)</th>
+                <th style="text-align: right;">Disputed to Principal</th>
+                <th style="text-align: right;">Avg Resolution Time</th>
+                <th style="min-width: 160px;">Resolution Rate (%)</th>
+                <th style="text-align: center;">Department Status</th>
+              </tr>
+            </thead>
+            <tbody id="principalAnalyticsTableBody">
+              <tr>
+                <td colspan="8" style="text-align: center; padding: 2.5rem; color: var(--text-muted);">
+                  Loading executive analytics report...
+                </td>
+              </tr>
+            </tbody>
+            <tfoot id="principalAnalyticsTableFoot">
+              <!-- Injected dynamically -->
+            </tfoot>
+          </table>
+        </div>
+      </div>
+
+    </div>
+
+  </main>
+
+  <script src="app.js"></script>
+</body>
+</html>

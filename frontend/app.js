@@ -1309,6 +1309,12 @@ if (authLoggedOutView && authLoggedInView) {
       if (tabCounselorBtn) tabCounselorBtn.style.display = "inline-block";
       const adminBtn = document.getElementById("adminPortalBtn");
       if (adminBtn) adminBtn.style.display = "inline-block";
+      const principalBtn = document.getElementById("principalPortalBtn");
+      if (principalBtn) principalBtn.style.display = "inline-block";
+    } else if (currentUser.role === "Principal") {
+      currentAuthority = "All";
+      const principalBtn = document.getElementById("principalPortalBtn");
+      if (principalBtn) principalBtn.style.display = "inline-block";
     } else if (currentUser.assigned_authority) {
       currentAuthority = currentUser.assigned_authority;
       if (authoritySelector) {
@@ -2094,3 +2100,364 @@ if (adminUsersTableBody) {
     }
   };
 }
+
+// =======================================================
+// E. Principal Executive Analytics Dashboard (principal.html)
+// =======================================================
+const principalAnalyticsTableBody = document.getElementById("principalAnalyticsTableBody");
+if (principalAnalyticsTableBody) {
+  const currentPrincipalUser = getAuthUser();
+  const currentToken = getAuthToken();
+  const deniedBox = document.getElementById("principalAccessDeniedAlert");
+  const contentBox = document.getElementById("principalMainContent");
+
+  const inlineLoginForm = document.getElementById("principalInlineLoginForm");
+  const inlineLoginErr = document.getElementById("principalInlineLoginError");
+  const inlineLoginBtn = document.getElementById("principalInlineLoginBtn");
+  const logoutBtn = document.getElementById("principalLogoutBtn");
+  const refreshBtn = document.getElementById("btnRefreshAnalytics");
+
+  let barChartInstance = null;
+  let gaugeChartInstance = null;
+
+  logoutBtn?.addEventListener("click", async () => {
+    await handleGlobalLogout();
+    if (contentBox) contentBox.style.display = "none";
+    if (deniedBox) deniedBox.style.display = "block";
+  });
+
+  refreshBtn?.addEventListener("click", loadPrincipalAnalytics);
+
+  inlineLoginForm?.addEventListener("submit", async (e) => {
+    e.preventDefault();
+    if (inlineLoginErr) inlineLoginErr.style.display = "none";
+    if (inlineLoginBtn) {
+      inlineLoginBtn.disabled = true;
+      inlineLoginBtn.innerText = "Authenticating...";
+    }
+
+    const username = document.getElementById("principalInlineUsername").value.trim();
+    const password = document.getElementById("principalInlinePassword").value.trim();
+
+    try {
+      const res = await fetch(`${API_BASE}/auth/login`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ username, password })
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.detail || "Authentication failed. Please check credentials.");
+
+      if (data.user.role !== "Principal") {
+        throw new Error("Access forbidden: Principal credentials required (Dr. K. S. Pillai).");
+      }
+
+      setAuthSession(data.access_token, data.user);
+      if (deniedBox) deniedBox.style.display = "none";
+      if (contentBox) contentBox.style.display = "block";
+      loadPrincipalAnalytics();
+    } catch (err) {
+      if (inlineLoginErr) {
+        inlineLoginErr.innerText = err.message;
+        inlineLoginErr.style.display = "block";
+      } else {
+        alert(err.message);
+      }
+    } finally {
+      if (inlineLoginBtn) {
+        inlineLoginBtn.disabled = false;
+        inlineLoginBtn.innerText = "🔐 Sign In as Principal & View Analytics";
+      }
+    }
+  });
+
+  // Check existing session state on load
+  if (!currentPrincipalUser || currentPrincipalUser.role !== "Principal" || !currentToken) {
+    if (deniedBox) deniedBox.style.display = "block";
+    if (contentBox) contentBox.style.display = "none";
+  } else {
+    if (deniedBox) deniedBox.style.display = "none";
+    if (contentBox) contentBox.style.display = "block";
+    loadPrincipalAnalytics();
+  }
+
+  async function loadPrincipalAnalytics() {
+    try {
+      const token = getAuthToken();
+      if (!token) {
+        if (deniedBox) deniedBox.style.display = "block";
+        if (contentBox) contentBox.style.display = "none";
+        return;
+      }
+
+      const res = await fetch(`${API_BASE}/principal/analytics/authority-report`, {
+        headers: { "Authorization": `Bearer ${token}` }
+      });
+
+      if (res.status === 401 || res.status === 403) {
+        clearAuthSession();
+        if (deniedBox) deniedBox.style.display = "block";
+        if (contentBox) contentBox.style.display = "none";
+        if (inlineLoginErr) {
+          inlineLoginErr.innerText = "Session expired or unauthorized. Please sign in with Principal credentials.";
+          inlineLoginErr.style.display = "block";
+        }
+        return;
+      }
+
+      if (!res.ok) throw new Error(`Server returned HTTP ${res.status}`);
+      const report = await res.json();
+      const authorities = report.authorities || [];
+      const summary = report.summary || {};
+
+      // 1. Update KPI Summary Cards
+      const raisedEl = document.getElementById("kpiTotalRaised");
+      const rateEl = document.getElementById("kpiResolutionRate");
+      const resolvedEl = document.getElementById("kpiTotalResolved");
+      const escalatedEl = document.getElementById("kpiTotalEscalated");
+      const disputedEl = document.getElementById("kpiTotalDisputed");
+      const avgTimeEl = document.getElementById("kpiAvgTime");
+
+      if (raisedEl) raisedEl.innerText = summary.total_raised ?? 0;
+      if (rateEl) rateEl.innerText = `${summary.resolution_rate_percent ?? 0}%`;
+      if (resolvedEl) resolvedEl.innerText = `${summary.total_resolved ?? 0} resolved complaints`;
+      if (escalatedEl) escalatedEl.innerText = summary.total_escalated ?? 0;
+      if (disputedEl) disputedEl.innerText = summary.total_disputed ?? 0;
+      if (avgTimeEl) avgTimeEl.innerText = `${summary.avg_resolution_time_hours ?? 0}h`;
+
+      // 2. Detect & Alert on Underperforming Authorities (<50% rate or high resolution time)
+      const underperformingAlert = document.getElementById("underperformingAlertBox");
+      const underperformingList = document.getElementById("underperformingDepartmentsList");
+      const criticalDepts = authorities.filter(a => a.resolution_rate_percent < 50.0);
+      const slowDepts = authorities.filter(a => a.avg_resolution_time_hours > 24.0 && a.resolution_rate_percent >= 50.0);
+
+      if (underperformingAlert && underperformingList) {
+        const issues = [];
+        if (criticalDepts.length > 0) {
+          issues.push(`<strong>Low Resolution Velocity (&lt; 50%):</strong> ${criticalDepts.map(a => `${a.authority} (${a.resolution_rate_percent}%)`).join(", ")}`);
+        }
+        if (slowDepts.length > 0) {
+          issues.push(`<strong>Elevated Resolution Latency (&gt; 24h):</strong> ${slowDepts.map(a => `${a.authority} (${a.avg_resolution_time_hours}h)`).join(", ")}`);
+        }
+        if (issues.length > 0) {
+          underperformingList.innerHTML = issues.map(i => `<div style="margin-top: 3px;">• ${i}</div>`).join("");
+          underperformingAlert.style.display = "flex";
+        } else {
+          underperformingAlert.style.display = "none";
+        }
+      }
+
+      // 3. Populate Table Rows
+      if (authorities.length === 0) {
+        principalAnalyticsTableBody.innerHTML = `<tr><td colspan="8" style="text-align:center; padding:2.5rem; color:var(--text-muted);">No grievances recorded in the database yet.</td></tr>`;
+      } else {
+        principalAnalyticsTableBody.innerHTML = authorities.map(a => {
+          const isCritical = a.resolution_rate_percent < 50.0;
+          const isSlow = a.avg_resolution_time_hours > 24.0;
+          const rowClass = isCritical ? "row-highlight-danger" : (isSlow ? "row-highlight-warning" : "");
+          
+          let rateColor = "#10b981";
+          if (a.resolution_rate_percent < 50.0) rateColor = "#ef4444";
+          else if (a.resolution_rate_percent < 80.0) rateColor = "#f59e0b";
+
+          let statusBadge = `<span class="status-badge-optimal">🟢 Optimal</span>`;
+          if (isCritical) {
+            statusBadge = `<span class="status-badge-critical">⚠️ Critical (&lt;50%)</span>`;
+          } else if (a.total_disputed > 0) {
+            statusBadge = `<span class="status-badge-warning">⚡ Dispute Flagged</span>`;
+          } else if (isSlow || a.resolution_rate_percent < 80.0) {
+            statusBadge = `<span class="status-badge-warning">⏱️ Attention</span>`;
+          }
+
+          return `
+            <tr class="${rowClass}">
+              <td>
+                <div style="font-weight: 700; color: var(--text-main); font-size: 0.95rem;">${a.authority}</div>
+                ${a.total_disputed > 0 ? `<div style="font-size: 0.725rem; color: #dc2626; font-weight: 600;">⚠️ ${a.total_disputed} Student Appeal${a.total_disputed > 1 ? 's' : ''}</div>` : ''}
+              </td>
+              <td style="text-align: right; font-weight: 700;">${a.total_raised}</td>
+              <td style="text-align: right; color: #059669; font-weight: 600;">${a.total_resolved}</td>
+              <td style="text-align: right; color: ${a.total_escalated > 0 ? '#d97706' : 'var(--text-muted)'}; font-weight: 600;">${a.total_escalated}</td>
+              <td style="text-align: right; color: ${a.total_disputed > 0 ? '#dc2626' : 'var(--text-muted)'}; font-weight: 600;">${a.total_disputed}</td>
+              <td style="text-align: right; font-family: var(--font-mono); font-size: 0.85rem;">${a.avg_resolution_time_hours}h</td>
+              <td>
+                <div style="display: flex; justify-content: space-between; align-items: center; font-size: 0.825rem; font-weight: 700; color: ${rateColor};">
+                  <span>${a.resolution_rate_percent}%</span>
+                  <span style="font-size: 0.75rem; color: var(--text-muted); font-weight: normal;">${a.total_resolved}/${a.total_raised}</span>
+                </div>
+                <div class="rate-bar-bg">
+                  <div class="rate-bar-fill" style="width: ${Math.min(100, Math.max(0, a.resolution_rate_percent))}%; background: ${rateColor};"></div>
+                </div>
+              </td>
+              <td style="text-align: center;">${statusBadge}</td>
+            </tr>
+          `;
+        }).join("");
+      }
+
+      // 4. Populate Table Summary Footer
+      const tableFoot = document.getElementById("principalAnalyticsTableFoot");
+      if (tableFoot && summary) {
+        let sumRateColor = "#10b981";
+        if (summary.resolution_rate_percent < 50.0) sumRateColor = "#ef4444";
+        else if (summary.resolution_rate_percent < 80.0) sumRateColor = "#f59e0b";
+
+        tableFoot.innerHTML = `
+          <tr>
+            <td>
+              <div style="font-weight: 800; font-size: 0.95rem; color: var(--text-main);">🏛️ Institutional Total / Summary</div>
+            </td>
+            <td style="text-align: right; font-weight: 800; font-size: 1rem;">${summary.total_raised ?? 0}</td>
+            <td style="text-align: right; color: #059669; font-weight: 800; font-size: 1rem;">${summary.total_resolved ?? 0}</td>
+            <td style="text-align: right; color: #d97706; font-weight: 800; font-size: 1rem;">${summary.total_escalated ?? 0}</td>
+            <td style="text-align: right; color: #dc2626; font-weight: 800; font-size: 1rem;">${summary.total_disputed ?? 0}</td>
+            <td style="text-align: right; font-family: var(--font-mono); font-weight: 700;">${summary.avg_resolution_time_hours ?? 0}h</td>
+            <td>
+              <div style="display: flex; justify-content: space-between; align-items: center; font-size: 0.85rem; font-weight: 800; color: ${sumRateColor};">
+                <span>${summary.resolution_rate_percent ?? 0}%</span>
+                <span style="font-size: 0.75rem; color: var(--text-muted); font-weight: normal;">Overall Rate</span>
+              </div>
+              <div class="rate-bar-bg">
+                <div class="rate-bar-fill" style="width: ${Math.min(100, Math.max(0, summary.resolution_rate_percent || 0))}%; background: ${sumRateColor};"></div>
+              </div>
+            </td>
+            <td style="text-align: center;">
+              <span class="badge" style="background: #1e1b4b; color: #fff; font-weight: 700; padding: 0.3rem 0.7rem;">Apex Summary</span>
+            </td>
+          </tr>
+        `;
+      }
+
+      // 5. Render Chart.js Visualizations
+      renderPrincipalCharts(authorities);
+
+    } catch (err) {
+      principalAnalyticsTableBody.innerHTML = `<tr><td colspan="8" style="text-align:center; color:var(--danger); padding:2rem;">Report Error: ${err.message}</td></tr>`;
+    }
+  }
+
+  function renderPrincipalCharts(authorities) {
+    if (typeof Chart === "undefined") return;
+
+    const barCtx = document.getElementById("authorityBarChart");
+    const rateCtx = document.getElementById("resolutionRateChart");
+
+    if (barCtx) {
+      if (barChartInstance) barChartInstance.destroy();
+
+      const labels = authorities.map(a => a.authority);
+      const raisedData = authorities.map(a => a.total_raised);
+      const resolvedData = authorities.map(a => a.total_resolved);
+      const escalatedData = authorities.map(a => a.total_escalated);
+
+      barChartInstance = new Chart(barCtx, {
+        type: "bar",
+        data: {
+          labels: labels,
+          datasets: [
+            {
+              label: "Grievances Raised",
+              data: raisedData,
+              backgroundColor: "rgba(99, 102, 241, 0.85)",
+              borderColor: "rgb(79, 70, 229)",
+              borderWidth: 1.5,
+              borderRadius: 6
+            },
+            {
+              label: "Resolved",
+              data: resolvedData,
+              backgroundColor: "rgba(16, 185, 129, 0.85)",
+              borderColor: "rgb(5, 150, 105)",
+              borderWidth: 1.5,
+              borderRadius: 6
+            },
+            {
+              label: "Escalated",
+              data: escalatedData,
+              backgroundColor: "rgba(245, 158, 11, 0.85)",
+              borderColor: "rgb(217, 119, 6)",
+              borderWidth: 1.5,
+              borderRadius: 6
+            }
+          ]
+        },
+        options: {
+          responsive: true,
+          maintainAspectRatio: false,
+          plugins: {
+            legend: {
+              position: "top",
+              labels: { font: { family: "Inter", size: 12, weight: 600 } }
+            },
+            tooltip: {
+              padding: 10,
+              titleFont: { family: "Inter", size: 13, weight: 700 },
+              bodyFont: { family: "Inter", size: 12 }
+            }
+          },
+          scales: {
+            x: {
+              grid: { display: false },
+              ticks: { font: { family: "Inter", size: 11, weight: 600 } }
+            },
+            y: {
+              beginAtZero: true,
+              ticks: { precision: 0, font: { family: "Inter", size: 11 } },
+              grid: { color: "#f1f5f9" }
+            }
+          }
+        }
+      });
+    }
+
+    if (rateCtx) {
+      if (gaugeChartInstance) gaugeChartInstance.destroy();
+
+      const labels = authorities.map(a => a.authority);
+      const rates = authorities.map(a => a.resolution_rate_percent);
+      const bgColors = rates.map(r => r < 50.0 ? "rgba(239, 68, 68, 0.85)" : (r < 80.0 ? "rgba(245, 158, 11, 0.85)" : "rgba(16, 185, 129, 0.85)"));
+
+      gaugeChartInstance = new Chart(rateCtx, {
+        type: "bar",
+        data: {
+          labels: labels,
+          datasets: [{
+            label: "Resolution Rate (%)",
+            data: rates,
+            backgroundColor: bgColors,
+            borderRadius: 6
+          }]
+        },
+        options: {
+          indexAxis: "y",
+          responsive: true,
+          maintainAspectRatio: false,
+          plugins: {
+            legend: { display: false },
+            tooltip: {
+              callbacks: {
+                label: (context) => ` Resolution Rate: ${context.parsed.x}%`
+              }
+            }
+          },
+          scales: {
+            x: {
+              min: 0,
+              max: 100,
+              ticks: {
+                callback: (val) => `${val}%`,
+                font: { family: "Inter", size: 10 }
+              },
+              grid: { color: "#f1f5f9" }
+            },
+            y: {
+              grid: { display: false },
+              ticks: { font: { family: "Inter", size: 11, weight: 600 } }
+            }
+          }
+        }
+      });
+    }
+  }
+}
+

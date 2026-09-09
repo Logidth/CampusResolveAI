@@ -162,6 +162,16 @@ def require_admin_user(current_user: User = Depends(get_current_user)) -> User:
     return current_user
 
 
+def require_principal_user(current_user: User = Depends(get_current_user)) -> User:
+    """FastAPI dependency strictly restricting access to Principal."""
+    if current_user.role != "Principal":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Access forbidden: Principal privileges required."
+        )
+    return current_user
+
+
 def get_optional_user(
     authorization: Optional[str] = Header(None),
     db: Session = Depends(get_db)

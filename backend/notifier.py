@@ -165,7 +165,7 @@ def _dispatch_smtp(recipient_email: str, subject: str, plain_body: str, html_bod
             )
             _last_smtp_error = f"Brevo credits unavailable ({credits})"
         else:
-            brevo_from_email = (os.getenv("BREVO_SENDER_EMAIL") or os.getenv("SMTP_FROM_EMAIL") or smtp_user or "dlogidth4@gmail.com").strip()
+            brevo_from_email = (os.getenv("BREVO_SENDER_EMAIL") or "abijithmohanan2006@gmail.com").strip()
             brevo_from_name = os.getenv("BREVO_SENDER_NAME", "CampusResolve Alerts")
             success_any = False
             brevo_errors = []
